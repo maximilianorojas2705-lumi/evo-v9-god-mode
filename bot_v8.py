@@ -18,13 +18,11 @@ def webhook():
         text = data["message"].get("text","")
         name = data["message"]["from"].get("first_name","")
         if text == "/start":
-            reply = f"Hola {name}! EVO V9 GOD MODE ONLINE ✅ en Sao Paulo"
+            reply = f"Hola {name}! EVO V9 GOD MODE ONLINE ✅"
         else:
-            reply = f"EVO V9 recibio: {text}"
+            reply = f"Recibido: {text}"
         if TOKEN:
-            try:
-                requests.post(f"{API}/sendMessage", json={"chat_id":chat_id,"text":reply}, timeout=10)
-            except: pass
+            requests.post(f"{API}/sendMessage", json={"chat_id":chat_id,"text":reply}, timeout=10)
     return "OK",200
 
 if __name__ == "__main__":
