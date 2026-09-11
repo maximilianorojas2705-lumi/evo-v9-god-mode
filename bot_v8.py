@@ -3,7 +3,9 @@ import os
 import requests
 
 app = Flask(__name__)
-TOKEN = os.environ.get("TELEGRAM_TOKEN","")
+
+# Acepta BOT_TOKEN o TELEGRAM_TOKEN
+TOKEN = os.environ.get("BOT_TOKEN", "") or os.environ.get("TELEGRAM_TOKEN", "")
 API = f"https://api.telegram.org/bot{TOKEN}"
 
 @app.route("/")
@@ -15,15 +17,19 @@ def webhook():
     data = request.get_json(force=True, silent=True) or {}
     if "message" in data:
         chat_id = data["message"]["chat"]["id"]
-        text = data["message"].get("text","")
-        name = data["message"]["from"].get("first_name","")
+        text = data["message"].get("text", "")
+        name = data["message"]["from"].get("first_name", "")
+
         if text == "/start":
             reply = f"Hola {name}! EVO V9 GOD MODE ONLINE ✅"
         else:
             reply = f"Recibido: {text}"
+
         if TOKEN:
-            requests.post(f"{API}/sendMessage", json={"chat_id":chat_id,"text":reply}, timeout=10)
-    return "OK",200
+            requests.post(f"{API}/sendMessage", json={"chat_id": chat_id, "text": reply})
+
+    return "OK", 200
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
