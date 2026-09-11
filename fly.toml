@@ -1,4 +1,20 @@
+# fly.toml app configuration file generated for evo-v9-god-mode on 2026-09-11T16:37:39Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'evo-v9-god-mode'
+primary_region = 'gru'
+
+[build]
+
 [http_service]
   internal_port = 8080
   force_https = true
-  auto_stop_machines = false
+  auto_stop_machines = 'off'
+
+[[vm]]
+  memory = '1gb'
+  cpu_kind = 'shared'
+  cpus = 1
+  memory_mb = 1024
