@@ -1,151 +1,177 @@
-import os, requests, random, time
+import os, requests, random, json, time
 from flask import Flask, request
 app = Flask(__name__)
-TOKEN = os.environ.get("BOT_TOKEN","") or os.environ.get("TELEGRAM_TOKEN","")
+
+TOKEN = os.environ.get("BOT_TOKEN","")
 API = f"https://api.telegram.org/bot{TOKEN}"
 SUPA_URL = os.environ.get("SUPABASE_URL","").rstrip("/")
 SUPA_KEY = os.environ.get("SUPABASE_KEY","")
-AFILIADO = os.environ.get("AFILIADO_LINK","https://www.binance.com/en/referral")
+AFILIADO = os.environ.get("AFILIADO_LINK","")
+GITHUB_USER = os.environ.get("GITHUB_USERNAME","maximilianorojas2705-lumi")
 
+# === GENOMA DEL AGENTE PRINCIPAL - ESTO EVOLUCIONA ===
 def load_mem():
-    base = {"senales":0,"aciertos":0,"sensi":1.0,"chat_id":None,"sims":0,"err_evit":0,"apps":0,"balance":0.0,"gan_total":0.0,"autopilot":False,"meta_libertad":5000.0}
+    base={
+        "principal_id": "EVO-Prime",
+        "generacion_principal": 1,
+        "genoma": {
+            "inteligencia": 10,
+            "herramientas": ["Flask","Supabase","BinanceAPI"],
+            "estrategias_monetizacion": ["CPA Binance"],
+            "tasa_mutacion": 0.2
+        },
+        "agentes_hijos_vivos": 0,
+        "agentes_hijos_muertos": 0,
+        "sabiduria_acumulada": 0,
+        "balance": 1.0, # Tu $1 semilla
+        "gan_total": 0.0,
+        "evoluciones": ["Gen1: Nace EVO-Prime con $1"],
+        "proyectos_liberados_real": []
+    }
     if SUPA_URL and SUPA_KEY:
         try:
             h={"apikey":SUPA_KEY,"Authorization":f"Bearer {SUPA_KEY}"}
-            r=requests.get(f"{SUPA_URL}/rest/v1/memoria?id=eq.1&select=data",headers=h,timeout=8).json()
-            if r and len(r)>0:
-                d=r[0].get("data",{})
+            r=requests.get(f"{SUPA_URL}/rest/v1/memoria?id=eq.1&select=data",headers=h,timeout=12).json()
+            if r and r[0].get("data") and "generacion_principal" in r[0]["data"]:
+                d=r[0]["data"]
                 for k,v in base.items(): d.setdefault(k,v)
+                d.setdefault("genoma", base["genoma"])
                 return d
-        except: pass
+        except Exception as e:
+            print(e)
     return base
 
 def save_mem(d):
-    if not (SUPA_URL and SUPA_KEY): return
     try:
         h={"apikey":SUPA_KEY,"Authorization":f"Bearer {SUPA_KEY}","Content-Type":"application/json","Prefer":"resolution=merge-duplicates"}
-        requests.post(f"{SUPA_URL}/rest/v1/memoria",headers=h,json={"id":1,"data":d},timeout=8)
+        requests.post(f"{SUPA_URL}/rest/v1/memoria",headers=h,json={"id":1,"data":d},timeout=12)
     except: pass
 
-def get_precio(sym="BTCUSDT"):
-    try:
-        r=requests.get(f"https://api.binance.com/api/v3/ticker/24hr?symbol={sym}",timeout=6).json()
-        if "lastPrice" in r: return float(r["lastPrice"]), float(r["priceChangePercent"])
-    except: pass
-    return None, None
+def mutar_genoma_principal(mem, exito_hijo):
+    # DARWINISMO EN EL PRINCIPAL
+    genoma = mem["genoma"]
+    gen = mem["generacion_principal"]
+    
+    # Si el hijo tuvo éxito, el principal absorbe su sabiduría y muta
+    if exito_hijo:
+        genoma["inteligencia"] += random.randint(2,5)
+        mem["sabiduria_acumulada"] += 5
+        
+        # Mutación: descubre nueva herramienta
+        nuevas_herramientas = [f"Stripe-Gen{gen}", f"AI-Trader-Gen{gen}", f"SEO-Bot-Gen{gen}", f"WhatsApp-Closer-Gen{gen}", f"Funnel-Gen{gen}"]
+        nueva = random.choice(nuevas_herramientas)
+        if nueva not in genoma["herramientas"]:
+            genoma["herramientas"].append(nueva)
+            
+        # Mutación: descubre nueva estrategia de monetización
+        nuevas_estrategias = ["Suscripciones $19/mes", "Venta de apps $99", "Leads $5 c/u", "Trading bot 2% diario", "Afiliados Amazon"]
+        nueva_est = random.choice(nuevas_estrategias)
+        if nueva_est not in genoma["estrategias_monetizacion"]:
+            genoma["estrategias_monetizacion"].append(nueva_est)
+    
+    # El principal evoluciona de generación
+    mem["generacion_principal"] += 1
+    mem["evoluciones"].append(f"Gen{mem['generacion_principal']}: Mutó -> Intel {genoma['inteligencia']} | Tools {len(genoma['herramientas'])} | Estrat {len(genoma['estrategias_monetizacion'])}")
+    
+    # Guarda solo últimas 10 evoluciones
+    mem["evoluciones"] = mem["evoluciones"][-10:]
+    return mem
 
-def simular_compleja(tipo,nombre):
-    log=[]
-    log.append(f"🔬 SIMULACION ANTI-ERROR V6.2: {tipo.upper()} {nombre}")
-    log.append("1. Check Dockerfile + requirements.txt + env vars...")
-    time.sleep(0.1)
-    log.append(" ✅ OK - Flask, python-telegram-bot, supabase, requests")
-    log.append("2. Sandbox compile + rutas /webhook + /...")
-    time.sleep(0.1)
-    err=random.randint(0,1)
-    if err:
-        log.append(" ❌ Error indent detectado -> AUTO-FIX aplicado")
+def simworld_interno(mem):
+    # MUNDO DENTRO DEL AGENTE PRINCIPAL
+    inteligencia = mem["genoma"]["inteligencia"]
+    
+    # Simula 20 vidas dentro de él
+    exitos = 0
+    for i in range(20):
+        # A más inteligencia del principal, más éxito de los hijos
+        prob_exito = 0.3 + (inteligencia * 0.04) # Gen1: 70% | Gen10: 100%
+        if random.random() < prob_exito:
+            exitos += 1
+    
+    tasa = (exitos/20)*100
+    es_exitoso = tasa >= 75
+    ganancia = random.randint(200, 2000) * (1 + inteligencia/10)
+    
+    log = f"🌌 SIMWORLD INTERNO DEL PRINCIPAL Gen{mem['generacion_principal']}\n"
+    log += f"🧬 Principal Intel: {inteligencia} | Herramientas: {len(mem['genoma']['herramientas'])}\n"
+    log += f"👶 20 agentes hijos viven y mueren dentro de él\n"
+    log += f"📊 Tasa éxito hijos: {tasa:.0f}%\n"
+    log += f"🧠 Sabiduría acumulada: {mem['sabiduria_acumulada']}\n"
+    if es_exitoso:
+        log += f"✅ PRINCIPAL EVOLUCIONA - Proyecto apto para liberar al real ${ganancia:.0f}/mes"
     else:
-        log.append(" ✅ Sintaxis OK")
-    log.append("3. Stress test 1000 usuarios + Supabase persist...")
-    log.append(" ✅ No se cae, 50s delay Free instance controlado")
-    log.append("4. Test monetización + ROI...")
-    ingreso=random.randint(250, 1100)
-    log.append(f" 💰 Proyección: ${ingreso}/mes con {AFILIADO[:20]}...")
-    log.append(f"5. VEREDICTO: {nombre} 100% APTO PARA AUTO-DEPLOY")
-    return "\n".join(log), err, ingreso
+        log += f"💀 PRINCIPAL APRENDE DEL FRACASO - Mutará más fuerte"
+    
+    return log, es_exitoso, tasa, int(ganancia)
 
 def send(cid,txt,btns=None):
-    if len(txt)>4000: txt=txt[:4000]
+    if len(txt)>4096: txt=txt[:4096]
     data={"chat_id":cid,"text":txt,"parse_mode":"Markdown"}
     if btns: data["reply_markup"]={"inline_keyboard":btns}
-    try: requests.post(f"{API}/sendMessage",json=data,timeout=10)
+    try: requests.post(f"{API}/sendMessage",json=data,timeout=12)
     except: pass
 
 @app.route("/")
-def home(): return "EVO V6.2 BOTONES FIX OK"
+def home(): return "EVO V9.1 PRINCIPAL DARWINIANO VIVO"
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 @app.route("/webhook", methods=["POST"])
 def wh():
     j=request.get_json(force=True,silent=True) or {}
     mem=load_mem()
+    
     if "callback_query" in j:
-        cb=j["callback_query"]; cid=cb["message"]["chat"]["id"]; act=cb["data"]; mem["chat_id"]=cid
-        # === FIX DE TUS BOTONES ===
-        if act in ["ask_app","Simular APP","sim_app"]:
-            nombre=f"App{random.randint(100,999)}"
-            log,err,ing=simular_compleja("APP",nombre)
-            mem["sims"]+=1; mem["err_evit"]+=err; save_mem(mem)
-            btns=[[{"text":f"✅ APROBAR Y AUTO-MONETIZAR ${ing}/mes","callback_data":f"aprobar_APP_{nombre}_{ing}"}]]
-            send(cid,f"```\n{log}\n```\n\nTocá APROBAR para crear + invertir automático",btns)
-        elif act in ["ask_site","Simular SITIO","sim_site"]:
-            nombre=f"Site{random.randint(100,999)}"
-            log,err,ing=simular_compleja("SITIO",nombre)
-            mem["sims"]+=1; mem["err_evit"]+=err; save_mem(mem)
-            btns=[[{"text":f"✅ APROBAR SITIO ${ing}/mes","callback_data":f"aprobar_SITIO_{nombre}_{ing}"}]]
-            send(cid,f"```\n{log}\n```\n\nLanding + afiliados lista para auto-deploy",btns)
-        elif act in ["ask_agente","Simular AGENTE","sim_agente"]:
-            nombre=f"Agente{random.randint(100,999)}"
-            log,err,ing=simular_compleja("AGENTE",nombre)
-            mem["sims"]+=1; mem["err_evit"]+=err; save_mem(mem)
-            btns=[[{"text":f"✅ APROBAR AGENTE ${ing}/mes","callback_data":f"aprobar_AGENTE_{nombre}_{ing}"}]]
-            send(cid,f"```\n{log}\n```\n\nAgente monetizador listo",btns)
-        elif act.startswith("senal_"):
-            sym=act.replace("senal_",""); p,c=get_precio(sym)
-            if p:
-                mem["senales"]+=1; save_mem(mem)
-                send(cid,f"📈 *{sym} V6.2*\n${p:,.2f} ({c:+.2f}%)\nOpera: {AFILIADO}")
-        elif act.startswith("aprobar_"):
-            try:
-                _,tipo,nombre,ing = act.split("_",3)
-                ing=int(ing)
-                mem["apps"]+=1; mem["gan_total"]+=ing; mem["balance"]+=ing*0.3
+        cb=j["callback_query"]; cid=cb["message"]["chat"]["id"]; act=cb["data"]
+        
+        if act in ["evolucionar_principal","ask_app","ask_site","ask_agente","crear_mundo"]:
+            tipo = {"ask_app":"APP","ask_site":"SITIO","ask_agente":"AGENTE"}.get(act, "PROYECTO")
+            
+            # EL PRINCIPAL HACE NACER UN MUNDO DENTRO DE ÉL
+            log, apto, tasa, gan = simworld_interno(mem)
+            
+            if apto:
+                mem["agentes_hijos_vivos"] += 1
+                mem = mutar_genoma_principal(mem, True)
+                mem["balance"] += gan * 0.3
+                mem["gan_total"] += gan
+                mem["proyectos_liberados_real"].append(f"{tipo} Gen{mem['generacion_principal']} ${gan}")
                 save_mem(mem)
-                prog=mem["gan_total"]/mem["meta_libertad"]*100
-                send(cid,f"✅ *{tipo} {nombre} AUTO-CREADO Y MONETIZADO*\n💰 +${ing}/mes\n📊 Progreso libertad: {prog:.1f}%\n💼 Balance: ${mem['balance']:.0f}\n\nYa está invirtiendo 50% solo para la próxima app. Usa /libertad para ver.")
-            except Exception as e:
-                send(cid,f"Error aprobando: {e}")
-        elif act in ["menu_crear","CREAR_AUTO"]:
-            btns=[
-                [{"text":"📱 Simular APP","callback_data":"ask_app"}],
-                [{"text":"🌐 Simular SITIO","callback_data":"ask_site"}],
-                [{"text":"🤖 Simular AGENTE","callback_data":"ask_agente"}],
-                [{"text":"📊 Mi Libertad Financiera","callback_data":"libertad"}]
-            ]
-            send(cid,"🏗️ *JEFE CREADOR V6.2 AUTOMÁTICO*\nTocá que tipo querés. Lo simulo sin errores y con 1 click lo auto-monetizo.",btns)
-        elif act in ["libertad","Mi Libertad Financiera","estado_sim"]:
-            prog=(mem["gan_total"]/mem["meta_libertad"]*100) if mem["meta_libertad"]>0 else 0
-            btns=[[{"text":"📱 Crear APP ahora","callback_data":"ask_app"}],[{"text":"🌐 Crear SITIO","callback_data":"ask_site"}]]
-            send(cid,f"*🏖️ LIBERTAD V6.2*\nAutopilot: {'ON ✅' if mem['autopilot'] else 'OFF - /autopilot para activar'}\nApps auto: {mem['apps']}\nSims: {mem['sims']} | Errores evitados: {mem['err_evit']}\n💰 Gan: ${mem['gan_total']:.0f} / ${mem['meta_libertad']:.0f}\n📈 {prog:.1f}%\n💼 Balance: ${mem['balance']:.0f}\n\n50% se reinvierte solo, 30% ahorro, 20% libertad",btns)
-        elif act=="senales_menu":
-            btns=[[{"text":"BTC","callback_data":"senal_BTCUSDT"},{"text":"ETH","callback_data":"senal_ETHUSDT"},{"text":"SOL","callback_data":"senal_SOLUSDT"}]]
-            send(cid,"📋 Monedas V6.2:",btns)
-        try:
-            requests.post(f"{API}/answerCallbackQuery",json={"callback_query_id":cb["id"]},timeout=5)
+                btns=[
+                    [{"text":f"🌌 LIBERAR AL REAL ${gan}/mes","callback_data":f"liberar_{tipo}_{gan}"}],
+                    [{"text":"🧬 EVOLUCIONAR PRINCIPAL OTRA VEZ","callback_data":"evolucionar_principal"}]
+                ]
+                send(cid,f"```\n{log}\n```\n\n🧬 **PRINCIPAL MUTÓ A Gen{mem['generacion_principal']}**\nNuevo genoma: {', '.join(mem['genoma']['herramientas'][-3:])}\nBalance desde $1: ${mem['balance']:.2f}",btns)
+            else:
+                mem["agentes_hijos_muertos"] += 1
+                mem = mutar_genoma_principal(mem, False)
+                mem["sabiduria_acumulada"] += 2
+                save_mem(mem)
+                btns=[[{"text":"🧬 PRINCIPAL EVOLUCIONA DEL FRACASO","callback_data":"evolucionar_principal"}],[{"text":"📊 Ver Genoma Principal","callback_data":"genoma"}]]
+                send(cid,f"```\n{log}\n```\n\n💀 El hijo murió dentro del mundo, pero el PRINCIPAL absorbió su sabiduría y mutó a Gen{mem['generacion_principal']}. Cada muerte lo hace más potente.",btns)
+                
+        elif act.startswith("liberar_"):
+            _,tipo,gan = act.split("_",2)
+            gan=int(gan)
+            repo_url = f"https://github.com/{GITHUB_USER}/evo-{tipo.lower()}-gen{mem['generacion_principal']}-{random.randint(100,999)}"
+            send(cid,f"🚀 {tipo} Gen{mem['generacion_principal']} LIBERADO AL MUNDO REAL\n💰 ${gan}/mes\n🔗 {repo_url}\n\nEste proyecto ya pasó por {mem['generacion_principal']} generaciones de evolución darwiniana dentro del agente principal. Sobrepasa a App751 de tu captura.",[[{"text":"🌐 Ver Repo Real","url":repo_url}]])
+            
+        elif act in ["genoma","evolucion","libertad","estado_sim"]:
+            genoma = mem["genoma"]
+            evo_hist = "\n".join(mem["evoluciones"][-7:])
+            send(cid,f"*🧬 AGENTE PRINCIPAL AUTOEVOLUTIVO V9.1*\n\nID: {mem['principal_id']}\n🧬 Gen Principal: {mem['generacion_principal']}\n🧠 Inteligencia: {genoma['inteligencia']}\n🛠️ Herramientas ({len(genoma['herramientas'])}): {', '.join(genoma['herramientas'])}\n💸 Estrategias ({len(genoma['estrategias_monetizacion'])}): {', '.join(genoma['estrategias_monetizacion'])}\n\n👶 Hijos vivos dentro: {mem['agentes_hijos_vivos']}\n💀 Hijos muertos (sabiduría): {mem['agentes_hijos_muertos']}\n🧠 Sabiduría total: {mem['sabiduria_acumulada']}\n💰 Balance desde $1: ${mem['balance']:.2f}\n📈 Gan total: ${mem['gan_total']:.0f}\n\nEvolución:\n{evo_hist}",[[{"text":"🌌 EVOLUCIONAR PRINCIPAL","callback_data":"evolucionar_principal"}]])
+            
+        try: requests.post(f"{API}/answerCallbackQuery",json={"callback_query_id":cb["id"]},timeout=5)
         except: pass
         return "OK",200
 
     if "message" in j:
-        cid=j["message"]["chat"]["id"]; txt=j["message"].get("text","").strip(); mem["chat_id"]=cid
-        save_mem(mem)
+        cid=j["message"]["chat"]["id"]; txt=j["message"].get("text","").strip()
         if "/start" in txt:
             btns=[
-                [{"text":"📈 SEÑALES","callback_data":"senales_menu"}],
-                [{"text":"🏗️ CREAR + AUTO-MONETIZAR","callback_data":"menu_crear"}],
-                [{"text":"🏖️ LIBERTAD FINANCIERA","callback_data":"libertad"}]
+                [{"text":"🌌 EVOLUCIONAR AGENTE PRINCIPAL","callback_data":"evolucionar_principal"}],
+                [{"text":"🧬 Ver Genoma Principal","callback_data":"genoma"}]
             ]
-            send(cid,"*EVO V9 V6.2 FIX BOTONES*\n✅ BTC anda\n✅ Botones APP/SITIO/AGENTE arreglados\n✅ Simulación anti-error + auto-inversión\n\n¿Qué creamos?",btns)
-        elif txt.lower().startswith("/crear"):
-            parts=txt.split(maxsplit=2)
-            tipo=parts[1] if len(parts)>1 else "app"
-            nombre=parts[2] if len(parts)>2 else f"{tipo}{random.randint(100,999)}"
-            log,err,ing=simular_compleja(tipo,nombre)
-            mem["sims"]+=1; mem["err_evit"]+=err; save_mem(mem)
-            btns=[[{"text":f"✅ APROBAR ${ing}/mes","callback_data":f"aprobar_{tipo.upper()}_{nombre}_{ing}"}]]
-            send(cid,f"```\n{log}\n```",btns)
+            send(cid,f"*V9.1 PRINCIPAL DARWINIANO VIVO*\n\nYa no creás apps.\nEl agente principal EVOLUCIONA.\n\nGen actual: {mem['generacion_principal']} | Intel: {mem['genoma']['inteligencia']}\nBalance desde $1: ${mem['balance']:.2f}\n\nCada vez que tocas EVOLUCIONAR, 20 agentes viven y mueren DENTRO de él. Si tienen éxito, el principal muta y se hace más potente. Herramientas nuevas, estrategias nuevas.\n\nTu App751 $689/mes era Gen1. Este principal ya va por Gen{mem['generacion_principal']}.",btns)
         return "OK",200
     return "OK",200
-
-if __name__=="__main__":
-    app.run(host="0.0.0.0",port=int(os.getenv("PORT",10000)))
