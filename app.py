@@ -1,178 +1,150 @@
 import os
-from flask import Flask, request, jsonify
-from groq import Groq
-from github import Github
-import requests
-import time
 import re
+import time
+
+import requests
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# APIs reales
-GROQ_API = os.getenv("GROQ_API_KEY")
-GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# ---- Config segura: NUNCA crash en import ----
+GROQ_API_KEY  = os.getenv("GROQ_API_KEY", "")
+GITHUB_TOKEN  = os.getenv("GITHUB_TOKEN", "")
+SUPABASE_URL  = os.getenv("SUPABASE_URL", "")
+SUPABASE_KEY  = os.getenv("SUPABASE_KEY", "")
+PORT          = int(os.getenv("PORT", "10000"))
 
-groq = Groq(api_key=GROQ_API)
-github = Github(GITHUB_TOKEN)
-user = github.get_user()
+_groq = None
+_gh_user = None
 
+def get_groq():
+    global _groq
+    if _groq is None:
+        from groq import Groq
+        _groq = Groq(api_key=GROQ_API_KEY or "sin-key")
+    return _groq
+
+def get_github_user():
+    global _gh_user
+    if _gh_user is None:
+        from github import Github
+        _gh_user = Github(GITHUB_TOKEN).get_user()
+    return _gh_user
+
+# ---------- PASO 1: NAVEGA ----------
 def navegar_web_real(query):
-    """Paso 1: NAVEGA - Busca en web real"""
-    response = requests.get(
-        "https://api.duckduckgo.com/",
-        params={"q": query, "format": "json"}
-    )
-    # También puedes usar Google Custom Search API
-    return response.json()
+    try:
+        r = requests.get("https://api.duckduckgo.com/",
+                         params={"q": query, "format": "json"}, timeout=8)
+        d = r.json()
+        fuentes = [d.get("AbstractURL")] if d.get("AbstractURL") else []
+        fuentes += [t.get("FirstURL") for t in d.get("RelatedTopics", [])[:3]
+                    if isinstance(t, dict) and t.get("FirstURL")]
+        return fuentes or [f"https://www.google.com/search?q={query.replace(' ','+')}"]
+    except Exception:
+        return [f"https://www.google.com/search?q={query.replace(' ','+')}"]
 
+# ---------- PASO 2: APRENDE ----------
 def guardar_conocimiento(tema, resumen):
-    """Paso 2: APRENDE - Guarda en Supabase"""
-    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-    
-    # Verifica duplicados
-    check = requests.get(
-        f"{SUPABASE_URL}/rest/v1/memoria?tema=eq.{tema}",
-        headers=headers
-    ).json()
-    
-    if not check:
-        requests.post(
-            f"{SUPABASE_URL}/rest/v1/memoria",
-            headers=headers,
-            json={"tema": tema, "resumen": resumen, "gen": "Gen15", "timestamp": time.time()}
-        )
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        return {"status": "SKIP", "razon": "supabase sin config"}
+    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+               "Content-Type": "application/json", "Prefer": "return=minimal"}
+    try:
+        check = requests.get(f"{SUPABASE_URL}/rest/v1/memoria?tema=eq.{tema}",
+                             headers=headers, timeout=8).json()
+        if not check:
+            requests.post(f"{SUPABASE_URL}/rest/v1/memoria", headers=headers,
+                          json={"tema": tema, "resumen": resumen,
+                                "gen": "Gen15", "timestamp": time.time()}, timeout=8)
+            return {"status": "INSERTADO"}
+        return {"status": "YA_EXISTIA"}
+    except Exception as e:
+        return {"status": "ERROR", "detalle": str(e)[:120]}
 
+# ---------- PASO 3: PIENSA ----------
 def pensar_como_lumi(tema):
-    """Paso 3: PIENSA - Responde conversacional"""
-    response = groq.chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[
-            {"role": "system", "content": "Eres Lumi, un agente evolutivo que crea laboratorios reales. Responde en primera persona."},
-            {"role": "user", "content": f"Voy a aprender sobre {tema} y crear un laboratorio. Explícame qué harás en 3 líneas."}
-        ],
-        temperature=0.7
-    )
-    return response.choices[0].message.content
+    try:
+        r = get_groq().chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[
+                {"role": "system", "content":
+                 "Eres Lumi, agente evolutivo Gen15. Respondes en primera persona, "
+                 "3 líneas, y anuncias qué laboratorio vas a fabricar."},
+                {"role": "user", "content": f"Voy a aprender: {tema}. ¿Qué harás?"}],
+            temperature=0.7, max_tokens=300)
+        return r.choices[0].message.content
+    except Exception as e:
+        return (f"Entendí: voy a crear un Laboratorio de {tema}. "
+                f"(Groq offline: {str(e)[:80]})")
 
+# ---------- PASO 4: FABRICA ----------
 def fabricar_app_con_ia(tema):
-    """Paso 4: FABRICA - Groq programa app REAL"""
-    prompt = f"""Eres un desarrollador Python senior. Crea app.py completo para un 
-    Laboratorio Interactivo sobre: {tema}
-    
-    REQUISITOS OBLIGATORIOS:
-    - Flask app en un solo archivo
-    - Tailwind CSS via CDN
-    - Endpoint /api/navegar?q= que busca en web real
-    - Endpoint /api/execute que ejecuta código Python del usuario (usa subprocess)
-    - Endpoint /api/estructuras que crea listas/árboles/grafos en memoria
-    - Endpoint /api/chat con Groq integrado
-    - Página / con visualizador interactivo
-    
-    Código completo, sin comentarios largos, listo para deployar."""
-    
-    response = groq.chat.completions.create(
+    prompt = f"""Eres desarrollador Python senior. Escribe UN app.py Flask completo
+para un Laboratorio Interactivo sobre: {tema}
+OBLIGATORIO: Tailwind CDN en /, endpoints /api/navegar?q=, /api/execute (subprocess
+con timeout), /api/estructuras (lista/arbol/grafo en memoria), /api/chat (Groq).
+Devuelve SOLO el codigo, sin markdown, sin explicaciones."""
+    r = get_groq().chat.completions.create(
         model="llama-3.3-70b-versatile",
         messages=[{"role": "user", "content": prompt}],
-        temperature=0.3,
-        max_tokens=4000
-    )
-    
-    codigo = response.choices[0].message.content
-    # Limpia el código (quita markdown ```python)
-    codigo = re.sub(r'```python\n?', '', codigo)
-    codigo = re.sub(r'```\n?', '', codigo)
-    
-    return codigo.strip()
+        temperature=0.3, max_tokens=4000)
+    code = r.choices[0].message.content
+    code = re.sub(r"```python\n?", "", code)
+    code = re.sub(r"```", "", code)
+    return code.strip()
 
-def liberar_en_github(nombre_repo, codigo):
-    """Paso 5: LIBERA - Crea repo y deploya"""
-    try:
-        # Crea repo
-        repo_name = f"agente-{nombre_repo}-gen15"
-        repo = user.create_repo(repo_name, auto_init=True)
-        
-        # Crea app.py
-        repo.create_file(
-            "app.py",
-            "Creación automática de laboratorio",
-            codigo
-        )
-        
-        # Crea requirements.txt
-        requirements = """flask==3.0.0
-groq==0.4.2
-requests==2.31.0
-gunicorn==21.2.0"""
-        repo.create_file(
-            "requirements.txt",
-            "Dependencias",
-            requirements
-        )
-        
-        # Deploy a Render (webhook o API)
-        # Para esto necesitas usar Render API o GitHub Actions
-        
-        return {
-            "repo": f"github.com/{user.login}/{repo_name}",
-            "deploy": f"{repo_name}.onrender.com",
-            "status": "CREADO_OK"
-        }
-    except Exception as e:
-        return {"error": str(e), "status": "ERROR"}
+# ---------- PASO 5: LIBERA ----------
+def liberar_en_github(nombre, codigo):
+    slug = re.sub(r"[^a-z0-9-]", "-", nombre.lower())[:30]
+    repo_name = f"agente-{slug}-gen15-{int(time.time()) % 10000}"
+    user = get_github_user()
+    repo = user.create_repo(repo_name, auto_init=True)
+    repo.create_file("app.py", "Laboratorio generado por Lumi Gen15", codigo)
+    repo.create_file("requirements.txt", "deps",
+                     "flask>=3.0.0\ngroq>=0.4.2\nrequests>=2.31.0\ngunicorn>=21.2.0")
+    return {"repo": f"github.com/{user.login}/{repo_name}",
+            "deploy": f"https://{repo_name}.onrender.com", "status": "CREADO_OK"}
 
-@app.route("/", methods=["GET"])
+# ---------- RUTAS ----------
+@app.route("/")
+@app.route("/health")
 def home():
-    return jsonify({
-        "status": "LIVE_OK",
-        "gen": "Gen15",
-        "inteligencia": 95,
-        "endpoints": ["/api/aprender", "/api/crear", "/api/evolucionar"]
-    })
+    return jsonify({"status": "LIVE_OK", "gen": "Gen15", "inteligencia": 95,
+                    "tokens": {"groq": bool(GROQ_API_KEY),
+                               "github": bool(GITHUB_TOKEN),
+                               "supabase": bool(SUPABASE_URL)},
+                    "endpoints": ["/api/aprender", "/api/crear", "/api/evolucionar"]})
 
 @app.route("/api/aprender", methods=["POST"])
 def aprender():
-    """Flujo completo: Navega -> Aprende -> Piensa"""
-    data = request.json
-    tema = data.get("tema")
-    
-    # 1. Navega
-    fuentes = navegar_web_real(tema)
-    
-    # 2. Aprende
-    resumen = f"Conocimiento sobre {tema} aprendido en Gen15"
-    guardar_conocimiento(tema, resumen)
-    
-    # 3. Piensa
-    respuesta_lumi = pensar_como_lumi(tema)
-    
-    return jsonify({
-        "fuentes": fuentes,
-        "resumen": resumen,
-        "respuesta": respuesta_lumi,
-        "status": "APRENDIDO"
-    })
+    tema = (request.get_json(silent=True) or {}).get("tema", "ingenieria informatica")
+    return jsonify({"tema": tema,
+                    "fuentes": navegar_web_real(tema),
+                    "memoria": guardar_conocimiento(tema, f"Resumen Gen15 de {tema}"),
+                    "respuesta": pensar_como_lumi(tema),
+                    "status": "APRENDIDO"})
 
 @app.route("/api/crear", methods=["POST"])
-def crear_laboratorio():
-    """Flujo completo: Fabrica -> Libera"""
-    data = request.json
-    tema = data.get("tema")
-    nombre_repo = data.get("nombre", "ingenieria")
-    
-    # 4. Fabrica
-    codigo_app = fabricar_app_con_ia(tema)
-    
-    # 5. Libera
-    resultado = liberar_en_github(nombre_repo, codigo_app)
-    
-    return jsonify({
-        "codigo_lineas": len(codigo_app.split('\n')),
-        "repo": resultado.get("repo"),
-        "deploy_url": resultado.get("deploy"),
-        "status": resultado.get("status")
-    })
+def crear():
+    data = request.get_json(silent=True) or {}
+    tema = data.get("tema", "ingenieria informatica")
+    try:
+        codigo = fabricar_app_con_ia(tema)
+        resultado = liberar_en_github(data.get("nombre", "ingenieria"), codigo)
+        return jsonify({"lineas": len(codigo.splitlines()), **resultado})
+    except Exception as e:
+        return jsonify({"status": "ERROR", "detalle": str(e)[:200]}), 200
+
+@app.route("/api/evolucionar")
+def evolucionar():
+    try:
+        repos = sum(1 for r in get_github_user().get_repos()
+                    if "gen15" in r.name)
+    except Exception:
+        repos = -1
+    return jsonify({"gen": "Gen14 -> Gen15", "inteligencia": 95,
+                    "repos_gen15": repos})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)))
+    app.run(host="0.0.0.0", port=PORT, threaded=True)
