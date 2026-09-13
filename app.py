@@ -1,150 +1,106 @@
-import os
-import re
-import time
+import threading
 
-import requests
-from flask import Flask, request, jsonify
+# ---- Config Telegram ----
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}" if TELEGRAM_TOKEN else None
 
-app = Flask(__name__)
-
-# ---- Config segura: NUNCA crash en import ----
-GROQ_API_KEY  = os.getenv("GROQ_API_KEY", "")
-GITHUB_TOKEN  = os.getenv("GITHUB_TOKEN", "")
-SUPABASE_URL  = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY  = os.getenv("SUPABASE_KEY", "")
-PORT          = int(os.getenv("PORT", "10000"))
-
-_groq = None
-_gh_user = None
-
-def get_groq():
-    global _groq
-    if _groq is None:
-        from groq import Groq
-        _groq = Groq(api_key=GROQ_API_KEY or "sin-key")
-    return _groq
-
-def get_github_user():
-    global _gh_user
-    if _gh_user is None:
-        from github import Github
-        _gh_user = Github(GITHUB_TOKEN).get_user()
-    return _gh_user
-
-# ---------- PASO 1: NAVEGA ----------
-def navegar_web_real(query):
+def enviar_telegram(chat_id, texto):
+    if not TELEGRAM_API: return
     try:
-        r = requests.get("https://api.duckduckgo.com/",
-                         params={"q": query, "format": "json"}, timeout=8)
-        d = r.json()
-        fuentes = [d.get("AbstractURL")] if d.get("AbstractURL") else []
-        fuentes += [t.get("FirstURL") for t in d.get("RelatedTopics", [])[:3]
-                    if isinstance(t, dict) and t.get("FirstURL")]
-        return fuentes or [f"https://www.google.com/search?q={query.replace(' ','+')}"]
-    except Exception:
-        return [f"https://www.google.com/search?q={query.replace(' ','+')}"]
-
-# ---------- PASO 2: APRENDE ----------
-def guardar_conocimiento(tema, resumen):
-    if not SUPABASE_URL or not SUPABASE_KEY:
-        return {"status": "SKIP", "razon": "supabase sin config"}
-    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
-               "Content-Type": "application/json", "Prefer": "return=minimal"}
-    try:
-        check = requests.get(f"{SUPABASE_URL}/rest/v1/memoria?tema=eq.{tema}",
-                             headers=headers, timeout=8).json()
-        if not check:
-            requests.post(f"{SUPABASE_URL}/rest/v1/memoria", headers=headers,
-                          json={"tema": tema, "resumen": resumen,
-                                "gen": "Gen15", "timestamp": time.time()}, timeout=8)
-            return {"status": "INSERTADO"}
-        return {"status": "YA_EXISTIA"}
+        requests.post(f"{TELEGRAM_API}/sendMessage",
+                      json={"chat_id": chat_id, "text": texto, "parse_mode": "Markdown"},
+                      timeout=10)
     except Exception as e:
-        return {"status": "ERROR", "detalle": str(e)[:120]}
+        print(f"[TG ERROR] {e}")
 
-# ---------- PASO 3: PIENSA ----------
-def pensar_como_lumi(tema):
-    try:
-        r = get_groq().chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content":
-                 "Eres Lumi, agente evolutivo Gen15. Respondes en primera persona, "
-                 "3 líneas, y anuncias qué laboratorio vas a fabricar."},
-                {"role": "user", "content": f"Voy a aprender: {tema}. ¿Qué harás?"}],
-            temperature=0.7, max_tokens=300)
-        return r.choices[0].message.content
-    except Exception as e:
-        return (f"Entendí: voy a crear un Laboratorio de {tema}. "
-                f"(Groq offline: {str(e)[:80]})")
+def procesar_mensaje(chat_id, texto):
+    """Ejecuta el flujo completo según la intención del usuario"""
+    t = texto.strip().lower()
+    
+    if t in ("/start", "/ayuda", "hola", "inicio"):
+        enviar_telegram(chat_id, 
+            "🤖 *Lumi Gen15*\n\n"
+            "Comandos:\n"
+            "• `aprender <tema>` - Navego y guardo en memoria\n"
+            "• `crear <tema>` - Fabrico app y la subo a GitHub\n"
+            "• `evolucion` - Veo mi progreso Gen14→Gen15\n"
+            "• `salud` - Estado de mis tokens")
+    
+    elif t.startswith("aprender "):
+        tema = texto.strip()[9:].strip()
+        enviar_telegram(chat_id, f"🔍 Navegando web sobre *{tema}*...")
+        fuentes = navegar_web_real(tema)
+        mem = guardar_conocimiento(tema, f"Resumen Gen15 de {tema}")
+        pensamiento = pensar_como_lumi(tema)
+        enviar_telegram(chat_id,
+            f"✅ *Aprendido: {tema}*\n\n"
+            f"💭 {pensamiento}\n\n"
+            f"📚 Fuentes:\n" + "\n".join(fuentes[:3]) +
+            f"\n\n💾 Memoria: `{mem['status']}`")
+    
+    elif t.startswith("crear "):
+        tema = texto.strip()[6:].strip()
+        nombre = re.sub(r"[^a-z0-9-]", "-", tema.lower())[:20]
+        enviar_telegram(chat_id, 
+            f"⚙️ *Fabricando laboratorio* `{tema}`...\n"
+            f"(Esto tarda 30-60 segundos, te aviso cuando esté listo 🚀)")
+        
+        # Ejecutar en hilo separado (Groq tarda ~20s)
+        def trabajo():
+            try:
+                codigo = fabricar_app_con_ia(tema)
+                res = liberar_en_github(nombre, codigo)
+                enviar_telegram(chat_id,
+                    f"🚀 *Laboratorio Listo*\n\n"
+                    f"📦 Repo: [GitHub]({res['repo']})\n"
+                    f"🌐 Deploy: [{res['deploy'].replace('https://','')}]({res['deploy']})\n\n"
+                    f"📝 Código: {len(codigo.splitlines())} líneas\n"
+                    f"✨ Status: `{res['status']}`")
+            except Exception as e:
+                enviar_telegram(chat_id, f"❌ Error fabricando:\n`{str(e)[:200]}`")
+        
+        threading.Thread(target=trabajo, daemon=True).start()
+    
+    elif t in ("evolucion", "evolución", "gen"):
+        enviar_telegram(chat_id, "📊 Midiendo evolución Gen14→Gen15...")
+        datos = evolucionar()
+        enviar_telegram(chat_id,
+            f"🧬 *Evolución*\n\n"
+            f"Gen: `{datos['gen']}`\n"
+            f"Inteligencia: *{datos['inteligencia']}*\n"
+            f"Repos Gen15: {datos['repos_gen15']}")
+    
+    elif t in ("salud", "status", "estado"):
+        enviar_telegram(chat_id,
+            f"🩺 *Estado del sistema*\n\n"
+            f"Groq: {'✅' if GROQ_API_KEY else '❌'}\n"
+            f"GitHub: {'✅' if GITHUB_TOKEN else '❌'}\n"
+            f"Supabase: {'✅' if SUPABASE_URL else '❌'}\n"
+            f"Telegram: ✅")
+    
+    else:
+        enviar_telegram(chat_id, 
+            f"🤔 No entendí. Usa:\n"
+            f"`aprender <tema>` o `crear <tema>`\n"
+            f"Ej: `crear ingenieria informatica`")
 
-# ---------- PASO 4: FABRICA ----------
-def fabricar_app_con_ia(tema):
-    prompt = f"""Eres desarrollador Python senior. Escribe UN app.py Flask completo
-para un Laboratorio Interactivo sobre: {tema}
-OBLIGATORIO: Tailwind CDN en /, endpoints /api/navegar?q=, /api/execute (subprocess
-con timeout), /api/estructuras (lista/arbol/grafo en memoria), /api/chat (Groq).
-Devuelve SOLO el codigo, sin markdown, sin explicaciones."""
-    r = get_groq().chat.completions.create(
-        model="llama-3.3-70b-versatile",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.3, max_tokens=4000)
-    code = r.choices[0].message.content
-    code = re.sub(r"```python\n?", "", code)
-    code = re.sub(r"```", "", code)
-    return code.strip()
-
-# ---------- PASO 5: LIBERA ----------
-def liberar_en_github(nombre, codigo):
-    slug = re.sub(r"[^a-z0-9-]", "-", nombre.lower())[:30]
-    repo_name = f"agente-{slug}-gen15-{int(time.time()) % 10000}"
-    user = get_github_user()
-    repo = user.create_repo(repo_name, auto_init=True)
-    repo.create_file("app.py", "Laboratorio generado por Lumi Gen15", codigo)
-    repo.create_file("requirements.txt", "deps",
-                     "flask>=3.0.0\ngroq>=0.4.2\nrequests>=2.31.0\ngunicorn>=21.2.0")
-    return {"repo": f"github.com/{user.login}/{repo_name}",
-            "deploy": f"https://{repo_name}.onrender.com", "status": "CREADO_OK"}
-
-# ---------- RUTAS ----------
-@app.route("/")
-@app.route("/health")
-def home():
-    return jsonify({"status": "LIVE_OK", "gen": "Gen15", "inteligencia": 95,
-                    "tokens": {"groq": bool(GROQ_API_KEY),
-                               "github": bool(GITHUB_TOKEN),
-                               "supabase": bool(SUPABASE_URL)},
-                    "endpoints": ["/api/aprender", "/api/crear", "/api/evolucionar"]})
-
-@app.route("/api/aprender", methods=["POST"])
-def aprender():
-    tema = (request.get_json(silent=True) or {}).get("tema", "ingenieria informatica")
-    return jsonify({"tema": tema,
-                    "fuentes": navegar_web_real(tema),
-                    "memoria": guardar_conocimiento(tema, f"Resumen Gen15 de {tema}"),
-                    "respuesta": pensar_como_lumi(tema),
-                    "status": "APRENDIDO"})
-
-@app.route("/api/crear", methods=["POST"])
-def crear():
+@app.route("/telegram", methods=["POST"])
+def telegram_webhook():
     data = request.get_json(silent=True) or {}
-    tema = data.get("tema", "ingenieria informatica")
-    try:
-        codigo = fabricar_app_con_ia(tema)
-        resultado = liberar_en_github(data.get("nombre", "ingenieria"), codigo)
-        return jsonify({"lineas": len(codigo.splitlines()), **resultado})
-    except Exception as e:
-        return jsonify({"status": "ERROR", "detalle": str(e)[:200]}), 200
+    msg = data.get("message") or data.get("edited_message") or {}
+    texto = (msg.get("text") or "").strip()
+    chat_id = msg.get("chat", {}).get("id")
+    
+    if texto and chat_id:
+        threading.Thread(target=procesar_mensaje, args=(chat_id, texto), daemon=True).start()
+    
+    return "ok", 200
 
-@app.route("/api/evolucionar")
-def evolucionar():
-    try:
-        repos = sum(1 for r in get_github_user().get_repos()
-                    if "gen15" in r.name)
-    except Exception:
-        repos = -1
-    return jsonify({"gen": "Gen14 -> Gen15", "inteligencia": 95,
-                    "repos_gen15": repos})
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=PORT, threaded=True)
+@app.route("/telegram/set_webhook")
+def set_webhook():
+    """Llama a este endpoint UNA VEZ para conectar Telegram"""
+    if not TELEGRAM_API:
+        return "ERROR: TELEGRAM_BOT_TOKEN no configurado", 500
+    url = f"https://evo-v9-god-service.onrender.com/telegram"
+    r = requests.post(f"{TELEGRAM_API}/setWebhook", json={"url": url}, timeout=10)
+    return jsonify(r.json())
