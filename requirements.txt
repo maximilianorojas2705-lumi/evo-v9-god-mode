@@ -1,6 +1,7 @@
-flask>=3.0.0
-gunicorn>=21.2.0
-requests>=2.31.0
-groq>=0.4.2
-PyGithub>=2.2.0
-python-dotenv>=1.0.0
+Flask==2.3.3
+gunicorn==21.2.0
+python-dotenv==1.0.0
+requests==2.31.0
+python-telegram-bot==20.7
+groq==0.4.1
+supabase==2.3.1
