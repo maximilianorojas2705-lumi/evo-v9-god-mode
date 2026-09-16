@@ -121,7 +121,7 @@ def save_knowledge(topic, result):
     except Exception as e:
         print("[kb] save error:", e)
 
-# ---------- Sandbox y fitness ----------
+# ---------- Sandbox y limpieza de código (FIX) ----------
 def run_sandbox(code):
     try:
         p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
@@ -133,13 +133,26 @@ def run_sandbox(code):
         return f"Error de ejecución: {e}"
 
 def clean_code(raw):
-    code = raw
-    if "```" in code:
-        for p in code.split("```"):
-            if "import" in p or "def " in p:
-                code = p.replace("python", "").strip()
+    """Limpia código de markdown, backticks y texto extra."""
+    if not raw:
+        return ""
+    code = raw.strip()
+    # Remover markdown de código al inicio
+    if code.startswith("```"):
+        lines = code.split("\n")
+        # Quitar primera línea (```python, ```py, ```bash, ```, etc.)
+        if lines[0].startswith("```"):
+            lines = lines[1:]
+        # Quitar última línea si es ```
+        while lines and lines[-1].strip() in ("```", ""):
+            if lines[-1].strip() == "```":
+                lines = lines[:-1]
                 break
-    return code
+            lines = lines[:-1]
+        code = "\n".join(lines)
+    # Si todavía quedan backticks sueltos, removerlos
+    code = code.replace("```python", "").replace("```py", "").replace("```", "")
+    return code.strip()
 
 # ---------- Groq ----------
 def ask_groq(prompt, history=None):
@@ -149,6 +162,8 @@ def ask_groq(prompt, history=None):
     client = Groq(api_key=GROQ_API_KEY)
     system = ("Sos EVO V9 GOD MODE, un asistente experto con conocimiento de muchos frameworks de agentes. "
               "Si el usuario pide código o una tool, respondé ÚNICAMENTE código Python sin explicaciones. "
+              "NO uses markdown, NO envuelvas el código en backticks, NO agregues ```python ni ```. "
+              "Solo el código Python plano. "
               "Si es conversación normal, respondé como texto natural en español, breve y directo.")
     if BRAIN_CONTEXT:
         system += f"\nConocimiento de tus cerebros fusionados:\n{BRAIN_CONTEXT}"
@@ -181,7 +196,7 @@ def ask_groq(prompt, history=None):
 
 # ---------- Motor evolutivo con auto-evaluación ----------
 def evolve_program(task, generations=3, pop=3):
-    expected = (ask_groq(f"Para esta task: {task} — respondé ÚNICAMENTE el output exacto que imprimiría un programa correcto, sin explicaciones.") or "").strip()
+    expected = (ask_groq(f"Para esta task: {task} — respondé ÚNICAMENTE el output exacto que imprimiría un programa correcto, sin explicaciones ni código.") or "").strip()
     def fitness(out):
         if out.startswith(("Error", "Timeout")) or "Traceback" in out:
             return 0.0
@@ -189,7 +204,7 @@ def evolve_program(task, generations=3, pop=3):
         if expected and expected[:60] in out:
             s += 2.0
         return s
-    population = [clean_code(ask_groq(f"Escribí un programa Python distinto y creativo que: {task}. Solo código.")) for _ in range(pop)]
+    population = [clean_code(ask_groq(f"Escribí un programa Python distinto y creativo que: {task}. Solo código plano, sin markdown.")) for _ in range(pop)]
     best_code, best_score, best_out = None, -1.0, ""
     for gen in range(generations):
         scored = []
@@ -201,7 +216,7 @@ def evolve_program(task, generations=3, pop=3):
         print(f"[evolve] gen {gen+1} score: {best_score:.2f}")
         new_pop = [best_code]
         for sc, code, out in scored[:2]:
-            mut = ask_groq(f"Task: {task}\nCódigo:\n{code[:2000]}\nSalida:\n{out[:500]}\nOutput esperado: {expected[:200]}\nMutá/mejorá el código para que cumpla la task. Devolvé SOLO código Python.")
+            mut = ask_groq(f"Task: {task}\nCódigo:\n{code[:2000]}\nSalida:\n{out[:500]}\nOutput esperado: {expected[:200]}\nMutá/mejorá el código para que cumpla la task. Devolvé SOLO código Python plano, sin markdown.")
             new_pop.append(clean_code(mut))
         population = new_pop
     ok = bool(expected and expected[:60] in best_out)
@@ -232,7 +247,7 @@ def start_agent(chat_id, goal):
             prev_out, report, parts = "", [], ["# Agente multi-paso generado por EVO V9", f"# Objetivo: {goal}", ""]
             for i, step in enumerate(steps, 1):
                 code = clean_code(ask_groq(
-                    f"Paso {i} de un agente: {step}\nOutput del paso anterior:\n{prev_out[:800]}\nEscribí SOLO código Python que ejecute este paso y printee el resultado."))
+                    f"Paso {i} de un agente: {step}\nOutput del paso anterior:\n{prev_out[:800]}\nEscribí SOLO código Python plano (sin markdown) que ejecute este paso y printee el resultado."))
                 out = run_sandbox(code)
                 prev_out = out
                 report.append(f"🔹 Paso {i}: {step}\n→ {out[:400]}")
