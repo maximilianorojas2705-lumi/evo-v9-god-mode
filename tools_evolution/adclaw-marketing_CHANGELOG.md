@@ -1,0 +1,204 @@
+# Changelog
+
+All notable changes to AdClaw are documented in this file.
+
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+---
+
+## [1.0.9] - 2026-05-21
+
+### Fixed
+- **MCP startup-abort cleanup**: initial MCP background initialization now starts only after the lifespan cleanup block is active, so failed startup does not leave orphaned MCP connection tasks.
+
+## [1.0.8] - 2026-05-21
+
+### Fixed
+- **Hosted MCP startup readiness**: initial MCP client connections now run outside the FastAPI startup critical path so slow or unavailable external MCP services do not block hosted workspace readiness.
+- **MCP lifecycle races**: stale startup/reload clients can no longer overwrite newer MCP config, and partially connected clients are closed when startup initialization is cancelled.
+
+## [1.0.7] - 2026-05-19
+
+### Fixed
+- **Hosted Host AI quota UX**: AdClaw now shows a clear included-message limit notice instead of a generic fallback failure when hosted Host AI quota is exhausted.
+- **Fallback de-duplication**: provider fallback skips the active Host AI provider/model slot so a quota-limited hosted default is not retried as its own fallback.
+- **Runner diagnostics hardening**: query logs no longer include user message previews, debug dumps explicitly keep `0600` file permissions, and persona-scoped session IDs are sanitized before filesystem persistence.
+
+## [1.0.6] - 2026-05-18
+
+### Changed
+- **Session history resilience**: persisted chat history now ignores stale local media references after container or runtime path changes, keeping long-running deployments responsive across redeploys.
+- **Provider fallback reliability**: fallback model initialization now reuses the shared model factory path so provider recovery stays consistent with normal runtime selection.
+- **xAI model catalog refresh**: updated built-in Grok text-chat options to the current chat-compatible `grok-4.3` and `grok-4.20` lineup.
+
+## [1.0.5] - 2026-05-17
+
+### Changed
+- **Runtime startup optimizations**: memory services now use safer defaults, explicit ReMe enablement, background initialization, load guards, and diagnostics so small servers stay responsive during startup.
+- **Docker memory readiness**: release images preload the default embedding assets at build time and ship bounded memory-compaction defaults for more predictable first-run behavior.
+- **Shared memory continuity**: chat turns can be captured into Always-On Memory without embedding latency and surfaced across persona-scoped sessions when AOM capture is enabled.
+- **Channel idle efficiency**: QQ reconnect handling now uses bounded retry backoff to reduce idle churn during transient gateway or token refresh periods.
+
+## [1.0.4] - 2026-05-10
+
+### Added
+- **Xiaomi MiMo provider**: added first-class support for MiMo-V2.5-Pro, MiMo-V2.5, and MiMo-V2-Omni in the model registry, onboarding, and persona/model selection flows.
+- **Hosted deploy docs refresh**: added and refined Railway and cross-platform deployment guidance so hosted users have an up-to-date path for Docker image variants, health checks, and persistent volumes.
+
+### Changed
+- **Versioned Docker examples** now point to `1.0.4` variant tags alongside `latest`, keeping deployment docs aligned with the current release line.
+- **Official Docker release outputs** now publish consistent multi-arch (`linux/amd64`, `linux/arm64`) manifests for `full`, `browser`, and `core`.
+
+### Fixed
+- **Console polish across core surfaces**: improved responsive behavior, sidebar collapse/popup behavior, chat composer styling, workspace mobile layout, and multiple Control surfaces including Sessions, Diagnostics, Cron Jobs, and Channels.
+- **Shutdown reliability for local app and containers**: preserved caller cancellation during MCP teardown, treated benign grouped close cancellations as shutdown noise, and kept local shutdown quieter.
+- **Console dependency hardening**: removed an unsafe `refractor` override and scoped npm overrides by parent dependency so installs remain stable while reducing audit debt.
+
+## [1.0.2] - 2026-04-30
+
+### Fixed
+- **Graceful MCP client degradation**: a single broken/unauthorized MCP client (e.g. expired API key) no longer crashes app startup or query handling. Failed clients are logged and skipped; agent continues with the remaining tools.
+  - `agents/react_agent.py` `register_mcp_clients`: replaced re-raise with `continue`; added explicit `BaseExceptionGroup` branch (Python 3.11+ anyio TaskGroup teardown).
+  - `app/mcp/manager.py` `init_from_config` and `replace_client`: catch `BaseExceptionGroup` alongside `Exception` so anyio TaskGroup errors don't propagate to FastAPI lifespan.
+
+## [0.1.2] - 2026-03-15
+
+### Added
+- **14 LLM providers**: OpenAI (GPT-5.4, Codex Mini), Z.AI (GLM-4.7/4.6/4.5), Moonshot AI (Kimi K2.5, K2 Thinking), plus custom provider API
+- **Dashboard page**: persona status cards with model, skills, cron preview
+- **Per-persona chat tabs**: isolated sessions with shared AOM memory
+- **@mention selector**: persona chip bar above chat input
+- **Landing page** at website-landing/ (here.now-inspired design)
+- Partner referral links for Aliyun and Z.AI in Welcome wizard
+- 31 Mission Control tests + live E2E script
+
+### Fixed
+- PermissionError on `/app/logs` during MemoryManager start
+- Dashboard white page (wrong API endpoints + missing array guards)
+- Auto-retry narrowed to specific BadRequestError + user notification
+- Sidebar popup menus: solid white background
+- Diagnostics: human-readable formatting, newest errors first
+
+## [0.1.1] - 2026-03-14
+
+### Added
+- **AgentHub integration**: built-in agenthub-worker skill, Tasks button in Telegram
+- **here.now file publishing**: instant shareable links for any file
+- **Telegram Markdown**: bold/italic formatting with plain text fallback
+- Console cleanup: removed all Chinese text, deleted language switcher
+- Standardized CSS (spacing variables, drawer widths, typography)
+- Security cleanup: removed hardcoded IPs, translated all Chinese runtime strings
+- CODE_OF_CONDUCT.md, dependabot.yml, docs/comparison.md
+
+### Fixed
+- Auto-retry with clean context when LLM rejects stale session
+- Pinchtab crash loop (4 iterations of debugging)
+
+---
+
+## [0.1.0] - 2026-03-13
+
+First public release. Fork of [CoPaw](https://github.com/agentscope-ai/CoPaw) with significant additions for AI marketing teams.
+
+### Added
+
+#### Multi-Agent System
+- **Multi-agent personas** — create specialized agents (researcher, writer, SEO, ads) with SOUL.md identity, own LLM, skills, and cron schedule
+- **@tag routing** in Telegram — `@researcher find AI trends` sends to the right agent
+- **Coordinator delegation** — one agent orchestrates the rest, delegating tasks automatically
+- **Shared memory** across personas (file-based + vector store)
+- **5 persona templates** — Researcher, Content Writer, SEO Specialist, Ads Manager, Social Media
+
+#### Skills & Tools
+- **96+ built-in skills** — SEO (12), Ads (12), Marketing (30+), Social (5), Analytics, Browser (8), Office (4)
+- **10 agency-agent skills** — growth-hacker, social-media-strategist, tiktok-strategist, instagram-curator, analytics-reporter, app-store-optimizer, reddit-community-builder, trend-researcher, feedback-synthesizer, twitter-engager
+- **6 Citedy skills** — instagram-scraper, tiktok-scraper, youtube-video-extractor, social-extractor, domain-hunter, skill-quality-eval
+- **52 Citedy MCP tools** for SEO and marketing automation
+- **4 MCP servers** — citedy, agent_browser, xai_search, exa
+- **Self-healing skills** — broken YAML auto-fixed by LLM (3 attempts/session max)
+- **Skill quality evaluation** — `GET /api/skills/{name}/quality`
+
+#### Memory System
+- **Always-On Memory (AOM)** — SQLite + sqlite-vec + FTS5, hybrid search (vector + keyword + RRF ranking), auto-consolidation (60-min cycle)
+- **Multimodal memory** — ingest images, audio, PDF via Gemini Flash integration
+- **File inbox** — watch a directory for new files, auto-ingest into AOM
+- **Memory optimization (R1-R4)** — zero-LLM-cost deterministic layers:
+  - R1: Pre-compression (rule cleanup + N-gram codebook, 8-15% token savings)
+  - R2: Tiered context loading (L0/L1/L2 progressive summaries)
+  - R3: Near-duplicate detection (hybrid shingle-hash + word-overlap, 90% rate)
+  - R4: Temporal pruning (green >7d delete, yellow >30d condense, red keep)
+- **AOM REST API** — 12 endpoints: stats, CRUD, semantic query, file upload, consolidation, config
+- **Frozen memory snapshots** — hash-based prompt caching (HIT/REBUILT logging)
+
+#### Security
+- **Security scanner** — 208 patterns, 15 categories for skill code analysis
+- **Memory sanitizer** — 33 threat patterns, 7 categories for prompt injection defense
+- **LLM audit** for skills — async security review via `POST /api/skills/{name}/llm-audit`
+- **Security badges** in UI — visual pattern scan + LLM audit status per skill
+
+#### Channels (7 supported)
+- **Telegram** — interactive menu (/personas, /model, /skills, /status, /new), paginated commands, continuous typing indicator, persistent reply keyboard, message streaming (Bot API 9.5)
+- **Discord** — full messaging support
+- **DingTalk** — audio files, rich text images, duplicate message prevention
+- **Feishu (Lark)** — audio and file support
+- **QQ** — messaging channel
+- **Console** — local terminal chat
+- **iMessage** — Apple Messages integration
+
+#### LLM Providers (12 built-in)
+- openai, anthropic, aliyun-intl, aliyun-codingplan, azure-openai, openrouter, xai, ollama, llamacpp, mlx, modelscope, dashscope
+- Custom provider support with API key management
+- Model connection testing in Web UI
+
+#### Web Console
+- **Glassmorphism design** — gradient backgrounds, dark pill sidebar, pill buttons, Slate palette
+- **Pages**: Workspace, Skills, MCP, Personas, Models, Channels, Diagnostics, Sessions, Cron Jobs, Heartbeat, Environments, Chat
+- **Citedy Design System** — 4-phase redesign with `citedy-overrides.less` for Ant Design
+- API Keys Reference table + bulk ENV import
+
+#### Infrastructure
+- **Agent watchdog** — auto-restart on crash with health check
+- **Diagnostics page + API** — health status, error log, restart button
+- **Heartbeat monitoring** — file-based health pulse tracking
+- **LLM output filtering** — strip `<think>` tags from Qwen/DeepSeek, filter tool calls from user channels
+- **Atomic session saves** — tmp+rename pattern, corrupted sessions auto-backed up and recovered
+- **Browser automation** — Playwright + Chromium + Xvfb in Docker, PinchTab for token-efficient browser control
+
+#### CLI (13 commands)
+- `adclaw init` — initialize working directory
+- `adclaw app` — start web server
+- `adclaw channels` — configure messaging channels
+- `adclaw chats` — manage chat sessions
+- `adclaw clean` — cleanup temp data
+- `adclaw cron` — manage scheduled tasks
+- `adclaw env` — environment variable management
+- `adclaw providers` — LLM provider configuration
+- `adclaw skills` — skill management
+- `adclaw uninstall` — remove AdClaw data
+
+#### Docker & Deployment
+- **Multi-stage Dockerfile** — frontend build + runtime with Chromium, Xvfb, Supervisor
+- **Multi-architecture** — amd64, arm64
+- **Non-root execution** — app runs as `adclaw` user, system services as root
+- **Smart entrypoint** — auto-config Citedy MCP, Exa, Telegram from env vars; skill sync on start; config migration for new defaults
+- **docker-compose.yml** — data + secret volumes, all env vars documented
+
+#### Testing
+- **36+ test files** covering memory (8), security (5), personas (5), agents (3), delegation, diagnostics, watchdog, MCP resilience
+- **23 memory optimization tests** (R1-R4)
+- **Live stress-test script** — 120 memories, dedup verification, consolidation
+
+### Security
+
+- Removed hardcoded API keys and internal IPs from test files
+- All secrets loaded from environment variables or mounted volumes
+- `.gitignore` covers config.json, providers.json, envs.json, .env files
+
+---
+
+## [Unreleased]
+
+### Planned
+
+- Landing page (clawsy.app or GitHub Pages)
+- WhatsApp chann
