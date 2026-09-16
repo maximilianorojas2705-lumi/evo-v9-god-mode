@@ -1,4 +1,4 @@
-import os, base64, time, glob, importlib.util, requests
+import os, base64, time, glob, importlib.util, subprocess, sys, requests
 from flask import Flask, request, abort
 
 app = Flask(__name__)
@@ -10,6 +10,9 @@ GITHUB_REPO = os.getenv("GITHUB_REPO", "evo-v9-god-mode").strip()
 GITHUB_USERNAME = os.getenv("GITHUB_USERNAME", "maximilianorojas2705-lumi").strip()
 ADMIN_KEY = os.getenv("ADMIN_KEY", "").strip()
 SERVICE_URL = os.getenv("SERVICE_URL", "https://evo-v9-god-service.onrender.com").strip()
+SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
+AFILIADO_LINK = os.getenv("AFILIADO_LINK", "").strip()
 
 EVOLUTION_REPOS = {
     "freebuff": "CodebuffAI/freebuff",
@@ -28,7 +31,7 @@ EVOLUTION_REPOS = {
     "awesome-evo": "EvoMap/awesome-agent-evolution",
 }
 
-# ---------- Cargar cerebros/skills al arrancar ----------
+# ---------- Skills y contexto de cerebros ----------
 def load_skills():
     skills = {}
     for path in glob.glob("tools/*_skill.py"):
@@ -56,7 +59,43 @@ def build_brain_context():
 
 SKILLS = load_skills()
 BRAIN_CONTEXT = build_brain_context()
-print(f"[evo] skills cargados: {list(SKILLS.keys())} | context: {len(BRAIN_CONTEXT)} chars")
+LAST_CODE = {}
+print(f"[evo] skills: {list(SKILLS.keys())} | context: {len(BRAIN_CONTEXT)} chars")
+
+# ---------- Memoria Supabase ----------
+def sb_headers():
+    return {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
+            "Content-Type": "application/json", "Prefer": "return=minimal"}
+
+def save_memory(chat_id, role, content):
+    if not SUPABASE_URL or not SUPABASE_KEY: return
+    try:
+        requests.post(f"{SUPABASE_URL}/rest/v1/memory", headers=sb_headers(),
+                      json={"chat_id": chat_id, "role": role, "content": (content or "")[:2000]}, timeout=10)
+    except Exception as e:
+        print("[sb] save error:", e)
+
+def load_memory(chat_id):
+    if not SUPABASE_URL or not SUPABASE_KEY: return []
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/memory", headers=sb_headers(),
+                         params={"chat_id": f"eq.{chat_id}", "order": "created_at.desc", "limit": "8"}, timeout=10)
+        if r.status_code == 200:
+            return list(reversed(r.json()))
+    except Exception as e:
+        print("[sb] load error:", e)
+    return []
+
+# ---------- Sandbox para ejecutar tools ----------
+def run_sandbox(code):
+    try:
+        p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
+        out = (p.stdout or p.stderr)[:3000]
+        return out or "(el código corrió sin imprimir nada)"
+    except subprocess.TimeoutExpired:
+        return "Timeout: tardó más de 10 segundos"
+    except Exception as e:
+        return f"Error de ejecución: {e}"
 
 # ---------- Seguridad ----------
 def admin_only():
@@ -86,51 +125,59 @@ def send_telegram(chat_id, text):
     except Exception:
         pass
 
-def ask_groq(prompt):
-    if not GROQ_API_KEY: 
-        print("[groq] FALTA API KEY")
+def ask_groq(prompt, history=None):
+    if not GROQ_API_KEY:
         return "Falta GROQ_API_KEY"
     from groq import Groq
     client = Groq(api_key=GROQ_API_KEY)
-    
-    system = "Sos EVO V9 GOD MODE. Respondé solo código Python."
+    system = ("Sos EVO V9 GOD MODE, un asistente experto con conocimiento de muchos frameworks de agentes. "
+              "Si el usuario pide código o una tool, respondé ÚNICAMENTE código Python sin explicaciones. "
+              "Si es conversación normal, respondé como texto natural en español, breve y directo.")
     if BRAIN_CONTEXT:
         system += f"\nConocimiento de tus cerebros fusionados:\n{BRAIN_CONTEXT}"
-    
-    # Modelos ACTIVOS en Groq plan free - septiembre 2026
+    messages = [{"role": "system", "content": system}]
+    for m in (history or []):
+        role = m.get("role")
+        if role in ("user", "assistant"):
+            messages.append({"role": role, "content": (m.get("content") or "")[:1500]})
+    messages.append({"role": "user", "content": prompt})
     models = [
-        "meta-llama/llama-4-scout-17b-16e-instruct",  # 131K contexto, 30K TPM
-        "openai/gpt-oss-120b",                        # Reemplazo oficial de Llama
-        "qwen/qwen3-32b",                             # Fallback
-        "moonshotai/kimi-k2-instruct"                 # Último recurso
+        "meta-llama/llama-4-scout-17b-16e-instruct",
+        "openai/gpt-oss-120b",
+        "qwen/qwen3-32b",
+        "moonshotai/kimi-k2-instruct",
     ]
-    
     for model in models:
         try:
-            print(f"[groq] probando: {model}")
-            c = client.chat.completions.create(
-                model=model,
-                messages=[{"role": "system", "content": system},
-                          {"role": "user", "content": prompt}],
-                max_tokens=2500, 
-                temperature=0.9
-            )
+            c = client.chat.completions.create(model=model, messages=messages,
+                                               max_tokens=2500, temperature=0.9)
             print(f"[groq] OK con {model}")
             return c.choices[0].message.content
         except Exception as e:
-            error_msg = str(e)
-            print(f"[groq] FALLÓ {model}: {type(e).__name__}: {error_msg[:150]}")
-            if "rate limit" in error_msg.lower():
-                print(f"[groq] rate limit alcanzado, esperando 5s...")
+            print(f"[groq] FALLÓ {model}: {str(e)[:150]}")
+            if "rate limit" in str(e).lower():
                 time.sleep(5)
             continue
-    
-    return "def tool(): return 'Todos los modelos fallaron - ver logs en Render'"
+    return "def tool(): return 'Todos los modelos fallaron - ver logs'"
+
+def set_commands():
+    try:
+        requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands", json={"commands": [
+            {"command": "start", "description": "Iniciar EVO V9"},
+            {"command": "tool", "description": "Crear una tool nueva"},
+            {"command": "ejecutar", "description": "Ejecutar la última tool creada"},
+            {"command": "skills", "description": "Ver skills cargados"},
+            {"command": "memoria", "description": "Ver últimos recuerdos"},
+        ]}, timeout=10)
+    except Exception as e:
+        print("[tg] commands:", e)
+
+set_commands()
 
 # ---------- Rutas ----------
 @app.route("/")
 def home():
-    return f"EVO V9 LIVE - skills: {len(SKILLS)} - context: {len(BRAIN_CONTEXT)} chars", 200
+    return f"EVO V9 NIVEL 2 - skills: {len(SKILLS)} - context: {len(BRAIN_CONTEXT)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
 
 @app.route("/fusion")
 def fusion():
@@ -186,6 +233,10 @@ def telegram_webhook():
             return "ok", 200
         low = text.lower()
 
+        if low.startswith("/start") or low == "hola":
+            send_telegram(chat_id, "🧠 EVO V9 GOD MODE activo.\nComandos: /tool /ejecutar /skills /memoria\nTambién podés escribirme normal.")
+            return "ok", 200
+
         if "fusion" in low or "clonar" in low:
             k = f"?key={ADMIN_KEY}" if ADMIN_KEY else ""
             send_telegram(chat_id, f"FUSION 14 CEREBROS:\n{SERVICE_URL}/fusion{k}\n\nSKILLS:\n{SERVICE_URL}/fusion_skills{k}")
@@ -197,27 +248,56 @@ def telegram_webhook():
                 agente = mod.FreebuffAgent()
                 send_telegram(chat_id, agente.run_agent(text) + f"\nModelo: {agente.choose_model()}")
             else:
-                send_telegram(chat_id, "Skill freebuff no cargado en este deploy. Revisá /skills en el repo.")
+                send_telegram(chat_id, "Skill freebuff no cargado en este deploy.")
             return "ok", 200
 
-        if "skill" in low and "lista" in low:
-            send_telegram(chat_id, "Skills cargados: " + ", ".join(SKILLS.keys()))
+        if "skills" in low or "lista de skills" in low:
+            send_telegram(chat_id, "Skills cargados: " + (", ".join(SKILLS.keys()) or "ninguno"))
+            return "ok", 200
+
+        if "memoria" in low:
+            mem = load_memory(chat_id)
+            if not mem:
+                send_telegram(chat_id, "Memoria vacía o Supabase sin conectar.")
+            else:
+                resumen = "\n".join(f"• {m.get('role')}: {(m.get('content') or '')[:80]}" for m in mem[-6:])
+                send_telegram(chat_id, f"Últimos recuerdos:\n{resumen}")
+            return "ok", 200
+
+        if low.startswith("ejecuta") or low.startswith("corre") or low.startswith("/ejecutar"):
+            code = LAST_CODE.get(chat_id)
+            if not code:
+                send_telegram(chat_id, "No hay ninguna tool reciente para ejecutar. Primero pedime: crea una tool que...")
+                return "ok", 200
+            salida = run_sandbox(code)
+            send_telegram(chat_id, f"▶️ Resultado:\n{salida}")
+            save_memory(chat_id, "assistant", f"[ejecución] {salida[:500]}")
             return "ok", 200
 
         if "tool" in low or "crea" in low or "codigo" in low:
-            code = ask_groq(text)
+            history = load_memory(chat_id)
+            code = ask_groq(text, history)
             if "```" in code:
                 for p in code.split("```"):
                     if "import" in p or "def " in p:
                         code = p.replace("python", "").strip()
                         break
+            LAST_CODE[chat_id] = code
             tool_name = f"tool_{int(time.time())}"
             github_push(f"tools/{tool_name}.py", code, f"GOD {tool_name}")
             link = f"https://github.com/{GITHUB_USERNAME}/{GITHUB_REPO}/blob/main/tools/{tool_name}.py"
-            send_telegram(chat_id, f"{tool_name}.py\n{link}\n\n{code[:3500]}")
+            save_memory(chat_id, "user", text)
+            save_memory(chat_id, "assistant", f"[tool creada] {tool_name}")
+            send_telegram(chat_id, f"{tool_name}.py\n{link}\n\n{code[:3000]}\n\n▶️ Escribí 'ejecutar' para probarla ahora.")
             return "ok", 200
 
-        reply = ask_groq(text)[:3500].replace("```python", "").replace("```", "")
+        history = load_memory(chat_id)
+        reply = ask_groq(text, history)
+        if AFILIADO_LINK and any(w in low for w in ["plata", "ganar", "vender", "marketing", "afiliado"]):
+            reply += f"\n\n💸 Resource: {AFILIADO_LINK}"
+        reply = reply[:3500].replace("```python", "").replace("```", "")
+        save_memory(chat_id, "user", text)
+        save_memory(chat_id, "assistant", reply)
         send_telegram(chat_id, reply)
     except Exception as e:
         print("[telegram] error:", e)
