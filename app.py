@@ -87,23 +87,45 @@ def send_telegram(chat_id, text):
         pass
 
 def ask_groq(prompt):
-    if not GROQ_API_KEY: return "Falta GROQ_API_KEY"
+    if not GROQ_API_KEY: 
+        print("[groq] FALTA API KEY")
+        return "Falta GROQ_API_KEY"
     from groq import Groq
     client = Groq(api_key=GROQ_API_KEY)
+    
     system = "Sos EVO V9 GOD MODE. Respondé solo código Python."
     if BRAIN_CONTEXT:
         system += f"\nConocimiento de tus cerebros fusionados:\n{BRAIN_CONTEXT}"
-    for model in ["qwen/qwen3-32b", "llama-3.3-70b-versatile"]:
+    
+    # Modelos ACTIVOS en Groq plan free - septiembre 2026
+    models = [
+        "meta-llama/llama-4-scout-17b-16e-instruct",  # 131K contexto, 30K TPM
+        "openai/gpt-oss-120b",                        # Reemplazo oficial de Llama
+        "qwen/qwen3-32b",                             # Fallback
+        "moonshotai/kimi-k2-instruct"                 # Último recurso
+    ]
+    
+    for model in models:
         try:
+            print(f"[groq] probando: {model}")
             c = client.chat.completions.create(
                 model=model,
                 messages=[{"role": "system", "content": system},
                           {"role": "user", "content": prompt}],
-                max_tokens=2500, temperature=0.9)
+                max_tokens=2500, 
+                temperature=0.9
+            )
+            print(f"[groq] OK con {model}")
             return c.choices[0].message.content
-        except Exception:
+        except Exception as e:
+            error_msg = str(e)
+            print(f"[groq] FALLÓ {model}: {type(e).__name__}: {error_msg[:150]}")
+            if "rate limit" in error_msg.lower():
+                print(f"[groq] rate limit alcanzado, esperando 5s...")
+                time.sleep(5)
             continue
-    return "def tool(): return 'Error Groq'"
+    
+    return "def tool(): return 'Todos los modelos fallaron - ver logs en Render'"
 
 # ---------- Rutas ----------
 @app.route("/")
