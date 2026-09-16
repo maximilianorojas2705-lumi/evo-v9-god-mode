@@ -1,4 +1,4 @@
-import os, base64, time, glob, importlib.util, subprocess, sys, requests
+import os, base64, time, glob, importlib.util, subprocess, sys, threading, requests
 from flask import Flask, request, abort
 
 app = Flask(__name__)
@@ -14,24 +14,23 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "").strip()
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "").strip()
 AFILIADO_LINK = os.getenv("AFILIADO_LINK", "").strip()
 
+# Cerebros evolutivos más poderosos de GitHub (sept 2026)
 EVOLUTION_REPOS = {
-    "freebuff": "CodebuffAI/freebuff",
-    "dgm-official": "jennyzzt/dgm",
-    "hgm-godel": "metauto-ai/HGM",
-    "godel-agent-code": "Arvid-pku/Godel_Agent",
-    "generic-agent": "lsdefine/GenericAgent",
-    "prime-agent": "PrimeIntellect-ai/prime-agent",
-    "hermes-agent": "NousResearch/hermes-agent",
+    "openevolve": "algorithmicsuperintelligence/openevolve",
+    "agents2-symbolic": "aiwaves-cn/agents",
     "evoagentx": "EvoAgentX/EvoAgentX",
-    "adclaw-marketing": "icedarold/adclaw",
-    "marketing-skills": "coreyhaines31/marketingskills",
-    "vibe-trading": "HKUDS/Vibe-Trading",
-    "tiktok-scraper": "maja-829/tiktok-comments-scraper",
+    "dgm": "jennyzzt/dgm",
+    "adas": "ShengranHu/ADAS",
+    "agentevolver": "modelscope/AgentEvolver",
+    "prime-agent": "PrimeIntellect-ai/prime-agent",
+    "freebuff": "CodebuffAI/freebuff",
+    "hgm-godel": "metauto-ai/HGM",
+    "awesome-evolution": "EvoMap/awesome-agent-evolution",
+    "self-evolving-survey": "XMUDeepLIT/Awesome-Self-Evolving-Agents",
     "openhands": "All-Hands-AI/OpenHands",
-    "awesome-evo": "EvoMap/awesome-agent-evolution",
 }
 
-# ---------- Skills y contexto de cerebros ----------
+# ---------- Skills y contexto ----------
 def load_skills():
     skills = {}
     for path in glob.glob("tools/*_skill.py"):
@@ -62,7 +61,7 @@ BRAIN_CONTEXT = build_brain_context()
 LAST_CODE = {}
 print(f"[evo] skills: {list(SKILLS.keys())} | context: {len(BRAIN_CONTEXT)} chars")
 
-# ---------- Memoria Supabase ----------
+# ---------- Supabase ----------
 def sb_headers():
     return {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
             "Content-Type": "application/json", "Prefer": "return=minimal"}
@@ -86,16 +85,67 @@ def load_memory(chat_id):
         print("[sb] load error:", e)
     return []
 
-# ---------- Sandbox para ejecutar tools ----------
+# ---------- Sandbox ----------
 def run_sandbox(code):
     try:
         p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
         out = (p.stdout or p.stderr)[:3000]
-        return out or "(el código corrió sin imprimir nada)"
+        return out or "(corrió sin imprimir nada)"
     except subprocess.TimeoutExpired:
         return "Timeout: tardó más de 10 segundos"
     except Exception as e:
         return f"Error de ejecución: {e}"
+
+def fitness(out):
+    if out.startswith(("Error", "Timeout")) or "Traceback" in out:
+        return 0.0
+    return 1.0 + min(len(out), 200) / 200.0
+
+# ---------- Motor evolutivo (estilo OpenEvolve/AlphaEvolve) ----------
+def clean_code(raw):
+    code = raw
+    if "```" in code:
+        for p in code.split("```"):
+            if "import" in p or "def " in p:
+                code = p.replace("python", "").strip()
+                break
+    return code
+
+def evolve_program(task, generations=3, pop=3):
+    population = []
+    for i in range(pop):
+        raw = ask_groq(f"Escribí un programa Python distinto y creativo que: {task}. Solo código.")
+        population.append(clean_code(raw))
+    best_code, best_score = None, -1.0
+    for gen in range(generations):
+        scored = []
+        for code in population:
+            out = run_sandbox(code)
+            scored.append((fitness(out), code, out))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        best_score, best_code, best_out = scored[0]
+        print(f"[evolve] gen {gen+1} mejor score: {best_score:.2f}")
+        new_pop = [best_code]
+        for sc, code, out in scored[:2]:
+            mut = ask_groq(
+                f"Task: {task}\nCódigo actual:\n{code[:2000]}\nSalida actual:\n{out[:500]}\n"
+                f"Mutá/mejorá este código para cumplir mejor la task. Devolvé SOLO código Python.")
+            new_pop.append(clean_code(mut))
+        population = new_pop
+    return best_code, best_score
+
+def start_evolution(chat_id, task):
+    def worker():
+        try:
+            code, score = evolve_program(task)
+            name = f"evolved_{int(time.time())}.py"
+            github_push(f"evolution/{name}", code, f"evolve: {task[:40]}")
+            link = f"https://github.com/{GITHUB_USERNAME}/{GITHUB_REPO}/blob/main/evolution/{name}"
+            save_memory(chat_id, "assistant", f"[evolución] {task[:100]} score {score:.2f}")
+            send_telegram(chat_id, f"🧬 EVOLUCIÓN COMPLETA\nScore: {score:.2f}\n{link}\n\nMejor individuo:\n{code[:2500]}")
+        except Exception as e:
+            send_telegram(chat_id, f"Error en evolución: {e}")
+    threading.Thread(target=worker, daemon=True).start()
 
 # ---------- Seguridad ----------
 def admin_only():
@@ -165,6 +215,7 @@ def set_commands():
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands", json={"commands": [
             {"command": "start", "description": "Iniciar EVO V9"},
             {"command": "tool", "description": "Crear una tool nueva"},
+            {"command": "evolucionar", "description": "Evolucionar un programa (3 generaciones)"},
             {"command": "ejecutar", "description": "Ejecutar la última tool creada"},
             {"command": "skills", "description": "Ver skills cargados"},
             {"command": "memoria", "description": "Ver últimos recuerdos"},
@@ -177,7 +228,7 @@ set_commands()
 # ---------- Rutas ----------
 @app.route("/")
 def home():
-    return f"EVO V9 NIVEL 2 - skills: {len(SKILLS)} - context: {len(BRAIN_CONTEXT)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
+    return f"EVO V9 NIVEL 3 - skills: {len(SKILLS)} - context: {len(BRAIN_CONTEXT)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'} - motor evolutivo: ON", 200
 
 @app.route("/fusion")
 def fusion():
@@ -202,18 +253,7 @@ def fusion():
             logs.append(f"OK {name} ({count})")
         except Exception:
             pass
-    return "<h1>FUSION 14 CEREBROS + FREEBUFF</h1><br>" + "<br>".join(logs)
-
-@app.route("/fusion_skills")
-def fusion_skills():
-    admin_only()
-    tiktok_code = 'import random\nclass TikTokViralScraper:\n def get_trending_hashtags(self): return ["#viral","#fyp"]\n def scrape_comments_insights(self, url): return {"viral_score": random.randint(70,99)}\n'
-    trading_code = 'import random\nclass TradingSkill:\n def analyze_market(self, s="BTC"): return {"signal": random.choice(["BUY","SELL","HOLD"])}\n'
-    marketing_code = 'class MarketingGrowthSkill:\n def generate_ad_copy(self, p): return {"hook": f"Este {p} cambio mi vida"}\n'
-    github_push("tools/tiktok_viral_scraper.py", tiktok_code, "skill tiktok")
-    github_push("tools/trading_agent_skill.py", trading_code, "skill trading")
-    github_push("tools/marketing_growth_skill.py", marketing_code, "skill marketing")
-    return "<h1>OK HABILIDADES</h1>"
+    return "<h1>FUSION CEREBROS EVOLUTIVOS</h1><br>" + "<br>".join(logs)
 
 @app.route("/set_webhook")
 def set_webhook():
@@ -234,12 +274,18 @@ def telegram_webhook():
         low = text.lower()
 
         if low.startswith("/start") or low == "hola":
-            send_telegram(chat_id, "🧠 EVO V9 GOD MODE activo.\nComandos: /tool /ejecutar /skills /memoria\nTambién podés escribirme normal.")
+            send_telegram(chat_id, "🧠 EVO V9 NIVEL 3 activo.\nComandos: /tool /evolucionar /ejecutar /skills /memoria")
+            return "ok", 200
+
+        if low.startswith("evoluciona") or low.startswith("/evolucionar") or low.startswith("evolve"):
+            task = text.split(" ", 1)[1] if " " in text else "optimizar una función matemática"
+            start_evolution(chat_id, task)
+            send_telegram(chat_id, f"🧬 Evolución iniciada: {task}\n3 generaciones x 3 individuos. Te aviso al terminar (~1-2 min).")
             return "ok", 200
 
         if "fusion" in low or "clonar" in low:
             k = f"?key={ADMIN_KEY}" if ADMIN_KEY else ""
-            send_telegram(chat_id, f"FUSION 14 CEREBROS:\n{SERVICE_URL}/fusion{k}\n\nSKILLS:\n{SERVICE_URL}/fusion_skills{k}")
+            send_telegram(chat_id, f"FUSION CEREBROS:\n{SERVICE_URL}/fusion{k}")
             return "ok", 200
 
         if "freebuff" in low:
@@ -251,7 +297,7 @@ def telegram_webhook():
                 send_telegram(chat_id, "Skill freebuff no cargado en este deploy.")
             return "ok", 200
 
-        if "skills" in low or "lista de skills" in low:
+        if "skills" in low:
             send_telegram(chat_id, "Skills cargados: " + (", ".join(SKILLS.keys()) or "ninguno"))
             return "ok", 200
 
@@ -267,7 +313,7 @@ def telegram_webhook():
         if low.startswith("ejecuta") or low.startswith("corre") or low.startswith("/ejecutar"):
             code = LAST_CODE.get(chat_id)
             if not code:
-                send_telegram(chat_id, "No hay ninguna tool reciente para ejecutar. Primero pedime: crea una tool que...")
+                send_telegram(chat_id, "No hay tool reciente. Primero pedime: crea una tool que...")
                 return "ok", 200
             salida = run_sandbox(code)
             send_telegram(chat_id, f"▶️ Resultado:\n{salida}")
@@ -277,18 +323,14 @@ def telegram_webhook():
         if "tool" in low or "crea" in low or "codigo" in low:
             history = load_memory(chat_id)
             code = ask_groq(text, history)
-            if "```" in code:
-                for p in code.split("```"):
-                    if "import" in p or "def " in p:
-                        code = p.replace("python", "").strip()
-                        break
+            code = clean_code(code)
             LAST_CODE[chat_id] = code
             tool_name = f"tool_{int(time.time())}"
             github_push(f"tools/{tool_name}.py", code, f"GOD {tool_name}")
             link = f"https://github.com/{GITHUB_USERNAME}/{GITHUB_REPO}/blob/main/tools/{tool_name}.py"
             save_memory(chat_id, "user", text)
             save_memory(chat_id, "assistant", f"[tool creada] {tool_name}")
-            send_telegram(chat_id, f"{tool_name}.py\n{link}\n\n{code[:3000]}\n\n▶️ Escribí 'ejecutar' para probarla ahora.")
+            send_telegram(chat_id, f"{tool_name}.py\n{link}\n\n{code[:3000]}\n\n▶️ Escribí 'ejecutar' para probarla.")
             return "ok", 200
 
         history = load_memory(chat_id)
