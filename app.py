@@ -112,16 +112,25 @@ GLOBAL_KB = load_knowledge()
 def save_knowledge(topic, result):
     global GLOBAL_KB
     if not SUPABASE_URL or not SUPABASE_KEY: return
+    # No guardar fracasos ni basura
+    if not result or "fallaron" in result or result.startswith(("Error", "Timeout", "Traceback", "def tool")):
+        return
     try:
-        insight = ask_groq(f"En UNA sola línea: ¿qué se aprendió de esto? Objetivo: {topic} | Resultado: {result[:300]}")
-        insight = (insight or "").replace("\n", " ")[:500]
+        insight = ask_groq(
+            f"Resumí en UNA sola línea de texto plano, sin código, sin backticks y sin markdown, "
+            f"qué se aprendió de esto. Objetivo: {topic} | Resultado: {result[:300]}")
+        insight = (insight or "").replace("```python", "").replace("```", "").replace("`", "")
+        insight = " ".join(insight.split())[:500]
+        # Rechazar insights que en realidad son código o errores
+        if len(insight) < 15 or "fallaron" in insight or insight.startswith(("def ", "import ", "Error", "Timeout")):
+            return
         requests.post(f"{SUPABASE_URL}/rest/v1/global_knowledge", headers=sb_headers(),
                       json={"topic": topic[:200], "content": insight}, timeout=10)
         GLOBAL_KB = (GLOBAL_KB + f"\n- {insight}")[-3000:]
     except Exception as e:
         print("[kb] save error:", e)
 
-# ---------- Sandbox y limpieza de código (FIX) ----------
+# ---------- Sandbox y limpieza de código ----------
 def run_sandbox(code):
     try:
         p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
@@ -137,20 +146,16 @@ def clean_code(raw):
     if not raw:
         return ""
     code = raw.strip()
-    # Remover markdown de código al inicio
     if code.startswith("```"):
         lines = code.split("\n")
-        # Quitar primera línea (```python, ```py, ```bash, ```, etc.)
         if lines[0].startswith("```"):
             lines = lines[1:]
-        # Quitar última línea si es ```
         while lines and lines[-1].strip() in ("```", ""):
             if lines[-1].strip() == "```":
                 lines = lines[:-1]
                 break
             lines = lines[:-1]
         code = "\n".join(lines)
-    # Si todavía quedan backticks sueltos, removerlos
     code = code.replace("```python", "").replace("```py", "").replace("```", "")
     return code.strip()
 
