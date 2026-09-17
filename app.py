@@ -129,7 +129,7 @@ def save_knowledge(topic, result):
     except Exception as e:
         print("[kb] save error:", e)
 
-# ---------- Claves de apps y datos de apps ----------
+# ---------- Claves y datos de apps ----------
 def app_key_valid(key):
     if not SUPABASE_URL or not SUPABASE_KEY: return False
     try:
@@ -239,7 +239,7 @@ def ask_groq(prompt, history=None):
         role = m.get("role")
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": (m.get("content") or "")[:1500]})
-    messages.append({"role": "user", "content": prompt}]
+    messages.append({"role": "user", "content": prompt})
     models = [
         "meta-llama/llama-4-scout-17b-16e-instruct",
         "openai/gpt-oss-120b",
@@ -356,7 +356,7 @@ def start_app_build(chat_id, desc):
 def start_clone(chat_id, full_repo):
     def worker():
         try:
-            ok = github_fork(full_repo)
+            github_fork(full_repo)
             short = full_repo.split("/")[-1]
             send_telegram(chat_id, f"🐒 CLONADO: https://github.com/{GITHUB_USERNAME}/{short}\nAhora podés mejorarlo: mejorar {short} <ruta/archivo>")
         except Exception as e:
@@ -469,11 +469,12 @@ def api_data():
     try:
         if request.method == "POST":
             d = request.get_json(force=True) or {}
-            key, appname, data = (d.get("key") or "").strip(), (d.get("app") or "").strip(), d.get("data")
+            key = (d.get("key") or "").strip()
+            appname = (d.get("app") or "").strip()
             if not key or not app_key_valid(key):
                 return jsonify({"error": "invalid key"}), 403
             requests.post(f"{SUPABASE_URL}/rest/v1/app_data", headers=sb_headers(),
-                          json={"app": appname, "data": data}, timeout=8)
+                          json={"app": appname, "data": d.get("data")}, timeout=8)
             return jsonify({"ok": True})
         key = (request.args.get("key") or "").strip()
         appname = (request.args.get("app") or "").strip()
@@ -599,7 +600,7 @@ def telegram_webhook():
             send_telegram(chat_id, "🧠 Lo que aprendí globalmente:\n" + (GLOBAL_KB or "(todavía nada)"))
             return "ok", 200
 
-        if "fusion" in low or "clonar" in low and " " not in low:
+        if "fusion" in low:
             k = f"?key={ADMIN_KEY}" if ADMIN_KEY else ""
             send_telegram(chat_id, f"FUSION CEREBROS:\n{SERVICE_URL}/fusion{k}")
             return "ok", 200
