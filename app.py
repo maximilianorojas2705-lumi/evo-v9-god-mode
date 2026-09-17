@@ -1,5 +1,5 @@
-import os, base64, time, glob, importlib.util, subprocess, sys, threading, requests
-from flask import Flask, request, abort
+import os, base64, time, glob, importlib.util, subprocess, sys, threading, secrets, requests
+from flask import Flask, request, abort, jsonify
 
 app = Flask(__name__)
 
@@ -29,7 +29,7 @@ EVOLUTION_REPOS = {
     "openhands": "All-Hands-AI/OpenHands",
 }
 
-# ---------- Skills, contexto y BIBLIOTECA de código propio ----------
+# ---------- Skills, contexto y biblioteca ----------
 def load_skills():
     skills = {}
     for path in glob.glob("tools/*_skill.py"):
@@ -70,9 +70,10 @@ SKILLS = load_skills()
 BRAIN_CONTEXT = build_brain_context()
 CODE_LIBRARY = scan_library()
 LAST_CODE = {}
-print(f"[evo] skills: {len(SKILLS)} | biblioteca: {len(CODE_LIBRARY)} programas | context: {len(BRAIN_CONTEXT)} chars")
+API_USAGE = {}
+print(f"[evo] skills: {len(SKILLS)} | biblioteca: {len(CODE_LIBRARY)} | context: {len(BRAIN_CONTEXT)} chars")
 
-# ---------- Supabase: memoria + conocimiento global ----------
+# ---------- Supabase ----------
 def sb_headers():
     return {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
             "Content-Type": "application/json", "Prefer": "return=minimal"}
@@ -112,7 +113,6 @@ GLOBAL_KB = load_knowledge()
 def save_knowledge(topic, result):
     global GLOBAL_KB
     if not SUPABASE_URL or not SUPABASE_KEY: return
-    # No guardar fracasos ni basura
     if not result or "fallaron" in result or result.startswith(("Error", "Timeout", "Traceback", "def tool")):
         return
     try:
@@ -121,7 +121,6 @@ def save_knowledge(topic, result):
             f"qué se aprendió de esto. Objetivo: {topic} | Resultado: {result[:300]}")
         insight = (insight or "").replace("```python", "").replace("```", "").replace("`", "")
         insight = " ".join(insight.split())[:500]
-        # Rechazar insights que en realidad son código o errores
         if len(insight) < 15 or "fallaron" in insight or insight.startswith(("def ", "import ", "Error", "Timeout")):
             return
         requests.post(f"{SUPABASE_URL}/rest/v1/global_knowledge", headers=sb_headers(),
@@ -130,7 +129,26 @@ def save_knowledge(topic, result):
     except Exception as e:
         print("[kb] save error:", e)
 
-# ---------- Sandbox y limpieza de código ----------
+# ---------- Claves de apps y datos de apps ----------
+def app_key_valid(key):
+    if not SUPABASE_URL or not SUPABASE_KEY: return False
+    try:
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/app_keys", headers=sb_headers(),
+                         params={"api_key": f"eq.{key}", "select": "id"}, timeout=8)
+        return r.status_code == 200 and len(r.json()) > 0
+    except Exception:
+        return False
+
+def issue_app_key(app_name):
+    key = secrets.token_hex(16)
+    try:
+        requests.post(f"{SUPABASE_URL}/rest/v1/app_keys", headers=sb_headers(),
+                      json={"app": app_name, "api_key": key}, timeout=8)
+    except Exception as e:
+        print("[apps] key error:", e)
+    return key
+
+# ---------- Sandbox y limpieza ----------
 def run_sandbox(code):
     try:
         p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
@@ -142,7 +160,6 @@ def run_sandbox(code):
         return f"Error de ejecución: {e}"
 
 def clean_code(raw):
-    """Limpia código de markdown, backticks y texto extra."""
     if not raw:
         return ""
     code = raw.strip()
@@ -159,6 +176,50 @@ def clean_code(raw):
     code = code.replace("```python", "").replace("```py", "").replace("```", "")
     return code.strip()
 
+# ---------- GitHub: disco duro del agente ----------
+def gh_headers():
+    return {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
+
+def github_push(path, code, msg):
+    return github_push_to(GITHUB_REPO, path, code, msg)
+
+def github_push_to(repo, path, content, msg):
+    try:
+        b64 = base64.b64encode(content.encode()).decode()
+        url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{repo}/contents/{path}"
+        r_get = requests.get(url, headers=gh_headers(), timeout=15)
+        data = {"message": msg, "content": b64}
+        if r_get.status_code == 200:
+            data["sha"] = r_get.json().get("sha")
+        r = requests.put(url, headers=gh_headers(), json=data, timeout=20)
+        return r.status_code in (200, 201)
+    except Exception:
+        return False
+
+def github_create_repo(name):
+    try:
+        r = requests.post("https://api.github.com/user/repos", headers=gh_headers(),
+                          json={"name": name, "public": True, "auto_init": False}, timeout=20)
+        return r.status_code in (201, 422)
+    except Exception:
+        return False
+
+def github_fork(full_repo):
+    try:
+        r = requests.post(f"https://api.github.com/repos/{full_repo}/forks", headers=gh_headers(), timeout=40)
+        return r.status_code in (200, 201, 202)
+    except Exception:
+        return False
+
+def enable_pages(repo):
+    try:
+        r = requests.post(f"https://api.github.com/repos/{GITHUB_USERNAME}/{repo}/pages",
+                          headers=gh_headers(),
+                          json={"build_type": "legacy", "source": {"branch": "main", "path": "/"}}, timeout=20)
+        return r.status_code in (200, 201, 409)
+    except Exception:
+        return False
+
 # ---------- Groq ----------
 def ask_groq(prompt, history=None):
     if not GROQ_API_KEY:
@@ -167,8 +228,7 @@ def ask_groq(prompt, history=None):
     client = Groq(api_key=GROQ_API_KEY)
     system = ("Sos EVO V9 GOD MODE, un asistente experto con conocimiento de muchos frameworks de agentes. "
               "Si el usuario pide código o una tool, respondé ÚNICAMENTE código Python sin explicaciones. "
-              "NO uses markdown, NO envuelvas el código en backticks, NO agregues ```python ni ```. "
-              "Solo el código Python plano. "
+              "NO uses markdown, NO envuelvas el código en backticks. Solo código plano. "
               "Si es conversación normal, respondé como texto natural en español, breve y directo.")
     if BRAIN_CONTEXT:
         system += f"\nConocimiento de tus cerebros fusionados:\n{BRAIN_CONTEXT}"
@@ -179,7 +239,7 @@ def ask_groq(prompt, history=None):
         role = m.get("role")
         if role in ("user", "assistant"):
             messages.append({"role": role, "content": (m.get("content") or "")[:1500]})
-    messages.append({"role": "user", "content": prompt})
+    messages.append({"role": "user", "content": prompt}]
     models = [
         "meta-llama/llama-4-scout-17b-16e-instruct",
         "openai/gpt-oss-120b",
@@ -199,7 +259,7 @@ def ask_groq(prompt, history=None):
             continue
     return "def tool(): return 'Todos los modelos fallaron - ver logs'"
 
-# ---------- Motor evolutivo con auto-evaluación ----------
+# ---------- Evolución ----------
 def evolve_program(task, generations=3, pop=3):
     expected = (ask_groq(f"Para esta task: {task} — respondé ÚNICAMENTE el output exacto que imprimiría un programa correcto, sin explicaciones ni código.") or "").strip()
     def fitness(out):
@@ -232,7 +292,7 @@ def start_evolution(chat_id, task):
         try:
             code, score, ok = evolve_program(task)
             name = f"evolved_{int(time.time())}.py"
-            github_push(f"evolution/{name}", code, f"evolve: {task[:40]}")
+            github_push(f"evolution/{name}", code, f"evolve: {task[:40]} [skip render]")
             CODE_LIBRARY[name[:-3]] = code
             link = f"https://github.com/{GITHUB_USERNAME}/{GITHUB_REPO}/blob/main/evolution/{name}"
             save_memory(chat_id, "assistant", f"[evolución] {task[:100]} score {score:.2f}")
@@ -259,33 +319,80 @@ def start_agent(chat_id, goal):
                 parts += [f"# --- Paso {i}: {step} ---", code, ""]
             name = f"agent_{int(time.time())}.py"
             full = "\n".join(parts)
-            github_push(f"agents/{name}", full, f"agent: {goal[:40]}")
+            github_push(f"agents/{name}", full, f"agent: {goal[:40]} [skip render]")
             CODE_LIBRARY[name[:-3]] = full
             save_knowledge(goal, prev_out)
             link = f"https://github.com/{GITHUB_USERNAME}/{GITHUB_REPO}/blob/main/agents/{name}"
-            send_telegram(chat_id, "🤖 AGENTE COMPLETADO\n\n" + "\n\n".join(report) + f"\n\nCódigo completo: {link}\nUsalo con: usar {name[:-3]}")
+            send_telegram(chat_id, "🤖 AGENTE COMPLETADO\n\n" + "\n\n".join(report) + f"\n\nCódigo: {link}\nUsalo con: usar {name[:-3]}")
         except Exception as e:
             send_telegram(chat_id, f"Error agente: {e}")
     threading.Thread(target=worker, daemon=True).start()
+
+# ---------- MODO PC: fábrica de apps web ----------
+def start_app_build(chat_id, desc):
+    def worker():
+        try:
+            name = f"app-{int(time.time())}"
+            github_create_repo(name)
+            appkey = issue_app_key(name)
+            html = clean_code(ask_groq(f"Generá UN index.html completo y moderno para: {desc}. Debe linkear style.css y script.js. Solo el HTML, sin markdown."))
+            css = clean_code(ask_groq(f"Generá UN style.css completo, moderno y oscuro para: {desc}. Solo CSS, sin markdown."))
+            js = clean_code(ask_groq(
+                f"Generá UN script.js para: {desc}. JavaScript plano, sin markdown.\n"
+                f"Para guardar/leer datos usá fetch a {SERVICE_URL}/api/data con key '{appkey}' y app '{name}'.\n"
+                f"Para usar IA usá fetch POST a {SERVICE_URL}/api/groq con JSON {{key:'{appkey}', prompt: texto}} y leé .reply.\n"))
+            github_push_to(name, "index.html", html, f"app: {desc[:40]}")
+            github_push_to(name, "style.css", css, "style")
+            github_push_to(name, "script.js", js, "script")
+            enable_pages(name)
+            url = f"https://{GITHUB_USERNAME}.github.io/{name}/"
+            save_knowledge(f"web app creada: {desc}", url)
+            send_telegram(chat_id, f"🌐 APP CONSTRUIDA Y PUBLICADA\nRepo: https://github.com/{GITHUB_USERNAME}/{name}\n🔴 EN VIVO (1-2 min): {url}")
+        except Exception as e:
+            send_telegram(chat_id, f"Error creando app: {e}")
+    threading.Thread(target=worker, daemon=True).start()
+
+# ---------- MODO PC: clonar y mejorar IAs ----------
+def start_clone(chat_id, full_repo):
+    def worker():
+        try:
+            ok = github_fork(full_repo)
+            short = full_repo.split("/")[-1]
+            send_telegram(chat_id, f"🐒 CLONADO: https://github.com/{GITHUB_USERNAME}/{short}\nAhora podés mejorarlo: mejorar {short} <ruta/archivo>")
+        except Exception as e:
+            send_telegram(chat_id, f"Error clonando: {e}")
+    threading.Thread(target=worker, daemon=True).start()
+
+def start_improve(chat_id, repo, path):
+    def worker():
+        try:
+            r = requests.get(f"https://api.github.com/repos/{GITHUB_USERNAME}/{repo}/contents/{path}", headers=gh_headers(), timeout=20)
+            if r.status_code != 200:
+                send_telegram(chat_id, f"No encontré {path} en {repo}")
+                return
+            original = base64.b64decode(r.json()["content"]).decode(errors="ignore")
+            improved = clean_code(ask_groq(f"Mejorá este código sin romper su función: más eficiente, con docstrings y manejo de errores. Devolvé SOLO el código mejorado:\n{original[:6000]}"))
+            msg = f"improve {path}" + (" [skip render]" if repo == GITHUB_REPO else "")
+            ok = github_push_to(repo, path, improved, msg)
+            send_telegram(chat_id, f"🔧 MEJORADO: {repo}/{path}\n{'Commit OK ✅' if ok else 'Falló el commit ❌'}\n\nAntes:\n{original[:300]}\n\nAhora:\n{improved[:600]}")
+        except Exception as e:
+            send_telegram(chat_id, f"Error mejorando: {e}")
+    threading.Thread(target=worker, daemon=True).start()
+
+# ---------- Cron autónomo ----------
+CRON_TASKS = [
+    "un programa que detecte si un texto es palíndromo",
+    "una función que convierta Celsius a Fahrenheit y muestre una tabla",
+    "un programa que calcule Fibonacci de forma eficiente",
+    "un script que genere contraseñas seguras aleatorias",
+    "una función que ordene palabras por longitud y alfabéticamente",
+]
+LAST_CRON = [0.0]
 
 # ---------- Seguridad y helpers ----------
 def admin_only():
     if not ADMIN_KEY or request.args.get("key") != ADMIN_KEY:
         abort(404)
-
-def github_push(path, code, msg):
-    try:
-        b64 = base64.b64encode(code.encode()).decode()
-        url = f"https://api.github.com/repos/{GITHUB_USERNAME}/{GITHUB_REPO}/contents/{path}"
-        headers = {"Authorization": f"token {GITHUB_TOKEN}"}
-        r_get = requests.get(url, headers=headers, timeout=15)
-        data = {"message": f"{msg} [skip render]", "content": b64}
-        if r_get.status_code == 200:
-            data["sha"] = r_get.json().get("sha")
-        r = requests.put(url, headers=headers, json=data, timeout=20)
-        return r.status_code in [200, 201]
-    except Exception:
-        return False
 
 def send_telegram(chat_id, text):
     try:
@@ -300,12 +407,14 @@ def set_commands():
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands", json={"commands": [
             {"command": "start", "description": "Iniciar EVO V9"},
             {"command": "tool", "description": "Crear una tool nueva"},
-            {"command": "evolucionar", "description": "Evolucionar un programa con auto-evaluación"},
-            {"command": "agente", "description": "Crear y ejecutar un agente multi-paso"},
-            {"command": "biblioteca", "description": "Ver todo el código que aprendí"},
-            {"command": "ejecutar", "description": "Ejecutar la última tool creada"},
-            {"command": "memoria", "description": "Ver últimos recuerdos"},
-            {"command": "sabiduria", "description": "Ver lo aprendido globalmente"},
+            {"command": "evolucionar", "description": "Evolucionar un programa"},
+            {"command": "agente", "description": "Agente multi-paso"},
+            {"command": "app", "description": "Crear y publicar una app web"},
+            {"command": "clonar", "description": "Clonar un repo/IA de GitHub"},
+            {"command": "mejorar", "description": "Mejorar un archivo clonado"},
+            {"command": "biblioteca", "description": "Ver código aprendido"},
+            {"command": "memoria", "description": "Recuerdos del chat"},
+            {"command": "sabiduria", "description": "Aprendizaje global"},
         ]}, timeout=10)
     except Exception as e:
         print("[tg] commands:", e)
@@ -315,13 +424,72 @@ set_commands()
 # ---------- Rutas ----------
 @app.route("/")
 def home():
-    return f"EVO V9 NIVEL 4 - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
+    return f"EVO V9 MODO PC - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
+
+@app.route("/cron")
+def cron():
+    admin_only()
+    if time.time() - LAST_CRON[0] < 6 * 3600:
+        return "cron: ya evolucioné hace menos de 6h", 200
+    LAST_CRON[0] = time.time()
+    task = CRON_TASKS[int(time.time()) % len(CRON_TASKS)]
+    def worker():
+        try:
+            code, score, ok = evolve_program(task)
+            name = f"evolved_{int(time.time())}.py"
+            github_push(f"evolution/{name}", code, f"[cron] evolve: {task[:40]} [skip render]")
+            CODE_LIBRARY[name[:-3]] = code
+            if ok or score >= 2.0:
+                save_knowledge(f"[cron] {task}", code[:200])
+        except Exception as e:
+            print("[cron] error:", e)
+    threading.Thread(target=worker, daemon=True).start()
+    return "cron: evolución autónoma lanzada", 200
+
+@app.route("/api/groq", methods=["POST"])
+def api_groq():
+    try:
+        d = request.get_json(force=True) or {}
+        key = (d.get("key") or "").strip()
+        prompt = (d.get("prompt") or "")[:4000]
+        if not key or not app_key_valid(key):
+            return jsonify({"error": "invalid key"}), 403
+        now = time.time()
+        use = [t for t in API_USAGE.get(key, []) if now - t < 3600]
+        if len(use) >= 30:
+            return jsonify({"error": "rate limit"}), 429
+        use.append(now)
+        API_USAGE[key] = use
+        return jsonify({"reply": ask_groq(prompt)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/api/data", methods=["GET", "POST"])
+def api_data():
+    try:
+        if request.method == "POST":
+            d = request.get_json(force=True) or {}
+            key, appname, data = (d.get("key") or "").strip(), (d.get("app") or "").strip(), d.get("data")
+            if not key or not app_key_valid(key):
+                return jsonify({"error": "invalid key"}), 403
+            requests.post(f"{SUPABASE_URL}/rest/v1/app_data", headers=sb_headers(),
+                          json={"app": appname, "data": data}, timeout=8)
+            return jsonify({"ok": True})
+        key = (request.args.get("key") or "").strip()
+        appname = (request.args.get("app") or "").strip()
+        if not key or not app_key_valid(key):
+            return jsonify({"error": "invalid key"}), 403
+        r = requests.get(f"{SUPABASE_URL}/rest/v1/app_data", headers=sb_headers(),
+                         params={"app": f"eq.{appname}", "order": "created_at.desc", "limit": "50"}, timeout=8)
+        return jsonify(r.json() if r.status_code == 200 else [])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/fusion")
 def fusion():
     admin_only()
     logs = []
-    headers = {"Authorization": f"token {GITHUB_TOKEN}"} if GITHUB_TOKEN else {}
+    headers = gh_headers()
     for name, repo_path in EVOLUTION_REPOS.items():
         try:
             r = requests.get(f"https://api.github.com/repos/{repo_path}/contents", headers=headers, timeout=20)
@@ -333,7 +501,7 @@ def fusion():
                     try:
                         content = requests.get(f["download_url"], timeout=10).text[:12000]
                         if len(content) < 80: continue
-                        if github_push(f"tools_evolution/{name}_{f['name']}", content, f"fusion {name}"):
+                        if github_push(f"tools_evolution/{name}_{f['name']}", content, f"fusion {name} [skip render]"):
                             count += 1
                     except Exception:
                         pass
@@ -361,34 +529,67 @@ def telegram_webhook():
         low = text.lower()
 
         if low.startswith("/start") or low == "hola":
-            send_telegram(chat_id, "🧠 EVO V9 NIVEL 4 activo.\n/evolucionar <task> | /agente <objetivo> | /biblioteca | /ejecutar | /memoria | /sabiduria")
+            send_telegram(chat_id, "🧠 EVO V9 MODO PC activo.\n/app <desc> | /clonar user/repo | /mejorar repo ruta | /evolucionar | /agente | /biblioteca | /memoria | /sabiduria")
+            return "ok", 200
+
+        if low.startswith("app ") or low == "/app":
+            desc = text.split(" ", 1)[1] if " " in text else ""
+            if not desc:
+                send_telegram(chat_id, "Uso: app <descripción>. Ej: app una lista de tareas con contador y modo oscuro")
+                return "ok", 200
+            start_app_build(chat_id, desc)
+            send_telegram(chat_id, f"🌐 Construyendo app: {desc}\nGenerando HTML+CSS+JS, creando repo y publicando. ~1-2 min.")
+            return "ok", 200
+
+        if low.startswith("clonar "):
+            full = text.split(" ", 1)[1].strip()
+            if "/" not in full:
+                send_telegram(chat_id, "Uso: clonar usuario/repo")
+                return "ok", 200
+            start_clone(chat_id, full)
+            send_telegram(chat_id, f"🐒 Clonando {full}...")
+            return "ok", 200
+
+        if low.startswith("mejorar "):
+            parts = text.split(" ", 2)
+            if len(parts) < 3:
+                send_telegram(chat_id, "Uso: mejorar <repo> <ruta/archivo.py>")
+                return "ok", 200
+            start_improve(chat_id, parts[1].strip(), parts[2].strip())
+            send_telegram(chat_id, f"🔧 Mejorando {parts[2]} en {parts[1]}...")
+            return "ok", 200
+
+        if low.startswith("ver "):
+            name = text.split(" ", 1)[1].strip()
+            code = CODE_LIBRARY.get(name)
+            send_telegram(chat_id, f"📄 {name}:\n{code[:3500]}" if code else f"No tengo '{name}'. Pedí /biblioteca.")
             return "ok", 200
 
         if low.startswith("evoluciona") or low.startswith("/evolucionar") or low.startswith("evolve"):
             task = text.split(" ", 1)[1] if " " in text else "optimizar una función matemática"
             start_evolution(chat_id, task)
-            send_telegram(chat_id, f"🧬 Evolución iniciada: {task}\n3 gen x 3 individuos + auto-evaluación. Te aviso en ~1-2 min.")
+            send_telegram(chat_id, f"🧬 Evolución iniciada: {task}\nTe aviso en ~1-2 min.")
             return "ok", 200
 
         if low.startswith("agente ") or low.startswith("/agente"):
             goal = text.split(" ", 1)[1] if " " in text else ""
             if not goal:
-                send_telegram(chat_id, "Uso: agente <objetivo>. Ej: agente que calcule el promedio de una lista y diga si es alto o bajo")
+                send_telegram(chat_id, "Uso: agente <objetivo>")
                 return "ok", 200
             start_agent(chat_id, goal)
-            send_telegram(chat_id, f"🤖 Agente iniciado: {goal}\n3 pasos encadenados. Te mando el reporte al terminar.")
+            send_telegram(chat_id, f"🤖 Agente iniciado: {goal}")
             return "ok", 200
 
         if "biblioteca" in low or low == "/tools":
             names = sorted(CODE_LIBRARY.keys())
-            send_telegram(chat_id, f"📚 Biblioteca ({len(names)} programas):\n" + ", ".join(names[:40]) + "\n\nUsá: usar <nombre>")
+            send_telegram(chat_id, f"📚 Biblioteca ({len(names)} programas):\n" + ", ".join(names[:40]) + "\n\nUsá: usar <nombre> | ver <nombre>")
             return "ok", 200
 
         if low.startswith("usar "):
             name = text.split(" ", 1)[1].strip()
             code = CODE_LIBRARY.get(name)
             if not code:
-                send_telegram(chat_id, f"No tengo '{name}'. Pedí /biblioteca para ver la lista.")
+                send_telegram(chat_id, f"No tengo '{name}'.")
                 return "ok", 200
             out = run_sandbox(code)
             send_telegram(chat_id, f"▶️ {name}:\n{out[:3000]}")
@@ -398,7 +599,7 @@ def telegram_webhook():
             send_telegram(chat_id, "🧠 Lo que aprendí globalmente:\n" + (GLOBAL_KB or "(todavía nada)"))
             return "ok", 200
 
-        if "fusion" in low or "clonar" in low:
+        if "fusion" in low or "clonar" in low and " " not in low:
             k = f"?key={ADMIN_KEY}" if ADMIN_KEY else ""
             send_telegram(chat_id, f"FUSION CEREBROS:\n{SERVICE_URL}/fusion{k}")
             return "ok", 200
@@ -424,11 +625,10 @@ def telegram_webhook():
         if low.startswith("ejecuta") or low.startswith("corre") or low.startswith("/ejecutar"):
             code = LAST_CODE.get(chat_id)
             if not code:
-                send_telegram(chat_id, "No hay tool reciente. Primero pedime: crea una tool que...")
+                send_telegram(chat_id, "No hay tool reciente. Primero: crea una tool que...")
                 return "ok", 200
             salida = run_sandbox(code)
             send_telegram(chat_id, f"▶️ Resultado:\n{salida}")
-            save_memory(chat_id, "assistant", f"[ejecución] {salida[:500]}")
             return "ok", 200
 
         if "tool" in low or "crea" in low or "codigo" in low:
@@ -436,12 +636,12 @@ def telegram_webhook():
             code = clean_code(ask_groq(text, history))
             LAST_CODE[chat_id] = code
             tool_name = f"tool_{int(time.time())}"
-            github_push(f"tools/{tool_name}.py", code, f"GOD {tool_name}")
+            github_push(f"tools/{tool_name}.py", code, f"GOD {tool_name} [skip render]")
             CODE_LIBRARY[tool_name] = code
             link = f"https://github.com/{GITHUB_USERNAME}/{GITHUB_REPO}/blob/main/tools/{tool_name}.py"
             save_memory(chat_id, "user", text)
             save_memory(chat_id, "assistant", f"[tool creada] {tool_name}")
-            send_telegram(chat_id, f"{tool_name}.py\n{link}\n\n{code[:2800]}\n\n▶️ 'ejecutar' para probarla | 'usar {tool_name}' siempre.")
+            send_telegram(chat_id, f"{tool_name}.py\n{link}\n\n{code[:2800]}\n\n▶️ 'ejecutar' | 'usar {tool_name}'")
             return "ok", 200
 
         history = load_memory(chat_id)
