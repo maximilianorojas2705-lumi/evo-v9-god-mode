@@ -557,7 +557,7 @@ def start_duel(chat_id, task):
             send_telegram(chat_id, f"Error duelo: {e}")
     threading.Thread(target=worker, daemon=True).start()
 
-# ---------- Modo profundo (least-to-most) ----------
+# ---------- Modo profundo ----------
 def deep_think(chat_id, q):
     def worker():
         try:
@@ -1007,7 +1007,7 @@ def simulate_until_100(chat_id, problem, max_rounds=5):
     def worker():
         try:
             tests = clean_code(ask_role("juez",
-                f"Escribí SOLO asserts planos (sin def, sin markdown) con 5 casos (incluí borde y error) para una función solve() que resuelve: {problem}"))
+                f"Escribí SOLO asserts planos (sin def, sin markdown) con 5 casos (incluí borde y error) para una función solve() que resuelve: {problem}. Para comparaciones con decimales usá round(x, 2) en ambos lados del assert."))
             sol = clean_code(ask_role("coder", f"Escribí SOLO una función solve() plana para: {problem}. Sin markdown."))
             log = []
             final_ok = False
@@ -1134,7 +1134,7 @@ def cors(resp):
 
 @app.route("/")
 def home():
-    return f"EVO V14 JARVIS - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
+    return f"EVO V15 CONSOLE - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
 
 @app.route("/cron")
 def cron():
@@ -1205,7 +1205,8 @@ def api_lab():
     except Exception:
         aut = [{}]
     return jsonify({"experiments": get("experiments", 15), "curriculum": get("curriculum", 10),
-                    "genome": genome_list()[:20], "autonomy": aut[0], "library": sorted(CODE_LIBRARY.keys())})
+                    "journal": get("journal", 8), "genome": genome_list()[:20], "autonomy": aut[0],
+                    "library": sorted(CODE_LIBRARY.keys())})
 
 @app.route("/fusion")
 def fusion():
@@ -1264,7 +1265,7 @@ def telegram_webhook():
         low = text.lower()
 
         if low.startswith("/start") or low == "hola":
-            send_telegram(chat_id, "🧠 EVO V14 JARVIS activo.\n/piensa | /simula | /proyecto | /ui | /app | /duelo | /evolucionar | /asimilar | /biblioteca | /genoma | /diario | /autonomia")
+            send_telegram(chat_id, "🧠 EVO V15 CONSOLE activo.\n/piensa | /simula | /proyecto | /ui | /app | /duelo | /evolucionar | /asimilar | /biblioteca | /genoma | /diario | /autonomia")
             return "ok", 200
 
         if low.startswith("piensa "):
