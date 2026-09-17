@@ -1,0 +1,75 @@
+def solve():
+    import sys, math
+    data = sys.stdin.read().strip().split()
+    if not data:
+        return
+    # first token can be period or count; detect format
+    # If first token is integer and next tokens count matches, treat as count
+    # Otherwise assume first token is period
+    # We'll support two formats:
+    # 1) n p1 p2 ... pn
+    # 2) period n p1 p2 ... pn
+    # Detect by checking if remaining count matches first token
+    tokens = list(data)
+    if len(tokens) >= 2 and tokens[0].isdigit():
+        first = int(tokens[0])
+        if len(tokens) == first + 1:
+            # format 1: count then prices, use default period 14
+            period = 14
+            prices = list(map(float, tokens[1:]))
+        elif len(tokens) >= 2 and tokens[1].isdigit():
+            # format 2: period, count, prices
+            period = first
+            count = int(tokens[1])
+            prices = list(map(float, tokens[2:2+count]))
+        else:
+            # ambiguous, assume first is count
+            period = 14
+            prices = list(map(float, tokens[1:]))
+    else:
+        # no explicit numbers, treat all as prices, default period
+        period = 14
+        prices = list(map(float, tokens))
+
+    if len(prices) < period + 1:
+        # not enough data to compute any RSI
+        print()
+        return
+
+    # Calculate initial average gain and loss
+    gains = []
+    losses = []
+    for i in range(1, period + 1):
+        change = prices[i] - prices[i - 1]
+        if change > 0:
+            gains.append(change)
+            losses.append(0.0)
+        else:
+            gains.append(0.0)
+            losses.append(-change)
+
+    avg_gain = sum(gains) / period
+    avg_loss = sum(losses) / period
+
+    rsi_values = []
+    # First RSI value corresponds to the price at index period
+    def compute_rsi(gain, loss):
+        if loss == 0:
+            return 100.0
+        rs = gain / loss
+        return 100.0 - (100.0 / (1.0 + rs))
+
+    rsi_values.append(compute_rsi(avg_gain, avg_loss))
+
+    # Subsequent RSI values using Wilder's smoothing
+    for i in range(period + 1, len(prices)):
+        change = prices[i] - prices[i - 1]
+        gain = change if change > 0 else 0.0
+        loss = -change if change < 0 else 0.0
+        avg_gain = (avg_gain * (period - 1) + gain) / period
+        avg_loss = (avg_loss * (period - 1) + loss) / period
+        rsi_values.append(compute_rsi(avg_gain, avg_loss))
+
+    # Output RSI values with 2 decimal precision
+    out = " ".join(f"{v:.2f}" for v in rsi_values)
+    sys.stdout.write(out)
