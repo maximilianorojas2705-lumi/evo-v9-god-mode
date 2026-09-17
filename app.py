@@ -525,6 +525,7 @@ def start_evolution(chat_id, task):
             name = f"evolved_{int(time.time())}.py"
             github_push(f"evolution/{name}", code, f"evolve: {task[:40]} [skip render]")
             CODE_LIBRARY[name[:-3]] = code
+            genome_register("evolved", name[:-3], parents="evolución-genética", fitness=score, provenance="evolución auto-evaluada", task=task)
             link = f"https://github.com/{GITHUB_USERNAME}/{GITHUB_REPO}/blob/main/evolution/{name}"
             save_memory(chat_id, "assistant", f"[evolución] {task[:100]} score {score:.2f}")
             if ok or score >= 2.0:
@@ -1077,6 +1078,7 @@ def autonomous_shift():
         name = f"evolved_{int(time.time())}.py"
         github_push(f"evolution/{name}", code, f"[auto] evolve: {task[:40]} [skip render]")
         CODE_LIBRARY[name[:-3]] = code
+        genome_register("evolved", name[:-3], parents="turno-autónomo", fitness=score, provenance="evolución nocturna", task=task)
         if ok or score >= 2.0:
             save_knowledge(f"[auto] {task}", code[:200])
         curriculum_done(cur_id)
@@ -1134,7 +1136,7 @@ def cors(resp):
 
 @app.route("/")
 def home():
-    return f"EVO V15 CONSOLE - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
+    return f"EVO V16 NUCLEO - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
 
 @app.route("/cron")
 def cron():
@@ -1265,7 +1267,24 @@ def telegram_webhook():
         low = text.lower()
 
         if low.startswith("/start") or low == "hola":
-            send_telegram(chat_id, "🧠 EVO V15 CONSOLE activo.\n/piensa | /simula | /proyecto | /ui | /app | /duelo | /evolucionar | /asimilar | /biblioteca | /genoma | /diario | /autonomia")
+            send_telegram(chat_id, "🧠 EVO V16 NUCLEO activo.\n/resuelve | /debate | /benchmark | /piensa | /simula | /proyecto | /ui | /app | /duelo | /evolucionar | /asimilar | /biblioteca | /genoma | /diario | /autonomia")
+            return "ok", 200
+
+        if low.startswith("resuelve "):
+            problem = text.split(" ", 1)[1]
+            solve_hard(chat_id, problem)
+            send_telegram(chat_id, f"🧠 Núcleo profundo activado: {problem[:100]}\n4 modelos compiten + verificador con tests + prueba pública. ~2 min.")
+            return "ok", 200
+
+        if low.startswith("debate "):
+            question = text.split(" ", 1)[1]
+            start_debate(chat_id, question)
+            send_telegram(chat_id, f"⚖️ Debate iniciado: {question[:100]}")
+            return "ok", 200
+
+        if low.startswith("benchmark"):
+            run_benchmark(chat_id)
+            send_telegram(chat_id, "📊 Corriendo benchmark del núcleo congelado...")
             return "ok", 200
 
         if low.startswith("piensa "):
