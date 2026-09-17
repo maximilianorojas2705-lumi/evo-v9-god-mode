@@ -29,6 +29,8 @@ EVOLUTION_REPOS = {
     "openhands": "All-Hands-AI/OpenHands",
 }
 
+OWNER_CHAT = [None]
+
 # ---------- Skills, contexto y biblioteca ----------
 def load_skills():
     skills = {}
@@ -129,6 +131,17 @@ def save_knowledge(topic, result):
     except Exception as e:
         print("[kb] save error:", e)
 
+def save_reflection(topic, error):
+    global GLOBAL_KB
+    if not SUPABASE_URL or not SUPABASE_KEY: return
+    line = f"Reflexión: en '{topic[:80]}' falló por {str(error)[:120]}; la próxima verificar eso primero."
+    try:
+        requests.post(f"{SUPABASE_URL}/rest/v1/global_knowledge", headers=sb_headers(),
+                      json={"topic": f"reflexion: {topic[:150]}", "content": line[:500]}, timeout=10)
+        GLOBAL_KB = (GLOBAL_KB + f"\n- {line}")[-3000:]
+    except Exception:
+        pass
+
 # ---------- Claves y datos de apps ----------
 def app_key_valid(key):
     if not SUPABASE_URL or not SUPABASE_KEY: return False
@@ -148,7 +161,7 @@ def issue_app_key(app_name):
         print("[apps] key error:", e)
     return key
 
-# ---------- Sandbox y limpieza ----------
+# ---------- Sandbox, limpieza y auto-reparación (Reflexion) ----------
 def run_sandbox(code):
     try:
         p = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=10)
@@ -176,7 +189,21 @@ def clean_code(raw):
     code = code.replace("```python", "").replace("```py", "").replace("```", "")
     return code.strip()
 
-# ---------- GitHub: disco duro del agente ----------
+def run_and_fix(code, task, attempts=2):
+    out = run_sandbox(code)
+    for _ in range(attempts):
+        if out.startswith(("Error", "Timeout")) or "Traceback" in out or "SyntaxError" in out:
+            fixed = clean_code(ask_groq(
+                f"Este código Python falla. Task: {task}\nCódigo:\n{code[:2500]}\nError:\n{out[:800]}\nDevolvé SOLO el código corregido, plano, sin markdown."))
+            if not fixed or fixed == code:
+                break
+            code = fixed
+            out = run_sandbox(code)
+        else:
+            break
+    return code, out
+
+# ---------- GitHub ----------
 def gh_headers():
     return {"Authorization": f"token {GITHUB_TOKEN}", "Accept": "application/vnd.github+json"}
 
@@ -291,6 +318,7 @@ def start_evolution(chat_id, task):
     def worker():
         try:
             code, score, ok = evolve_program(task)
+            code, out = run_and_fix(code, task)
             name = f"evolved_{int(time.time())}.py"
             github_push(f"evolution/{name}", code, f"evolve: {task[:40]} [skip render]")
             CODE_LIBRARY[name[:-3]] = code
@@ -298,8 +326,9 @@ def start_evolution(chat_id, task):
             save_memory(chat_id, "assistant", f"[evolución] {task[:100]} score {score:.2f}")
             if ok or score >= 2.0:
                 save_knowledge(task, code[:200])
-            send_telegram(chat_id, f"🧬 EVOLUCIÓN COMPLETA\nScore: {score:.2f} | output correcto: {'SÍ ✅' if ok else 'NO ❌'}\n{link}\n\nMejor individuo:\n{code[:2200]}\n\nUsalo con: usar {name[:-3]}")
+            send_telegram(chat_id, f"🧬 EVOLUCIÓN COMPLETA\nScore: {score:.2f} | output correcto: {'SÍ ✅' if ok else 'NO ❌'}\n▶️ Test: {out[:200]}\n{link}\n\nMejor individuo:\n{code[:2000]}\n\nUsalo con: usar {name[:-3]}")
         except Exception as e:
+            save_reflection(f"evolución {task[:60]}", e)
             send_telegram(chat_id, f"Error en evolución: {e}")
     threading.Thread(target=worker, daemon=True).start()
 
@@ -313,7 +342,7 @@ def start_agent(chat_id, goal):
             for i, step in enumerate(steps, 1):
                 code = clean_code(ask_groq(
                     f"Paso {i} de un agente: {step}\nOutput del paso anterior:\n{prev_out[:800]}\nEscribí SOLO código Python plano (sin markdown) que ejecute este paso y printee el resultado."))
-                out = run_sandbox(code)
+                code, out = run_and_fix(code, step, attempts=1)
                 prev_out = out
                 report.append(f"🔹 Paso {i}: {step}\n→ {out[:400]}")
                 parts += [f"# --- Paso {i}: {step} ---", code, ""]
@@ -325,10 +354,11 @@ def start_agent(chat_id, goal):
             link = f"https://github.com/{GITHUB_USERNAME}/{GITHUB_REPO}/blob/main/agents/{name}"
             send_telegram(chat_id, "🤖 AGENTE COMPLETADO\n\n" + "\n\n".join(report) + f"\n\nCódigo: {link}\nUsalo con: usar {name[:-3]}")
         except Exception as e:
+            save_reflection(f"agente {goal[:60]}", e)
             send_telegram(chat_id, f"Error agente: {e}")
     threading.Thread(target=worker, daemon=True).start()
 
-# ---------- MODO PC: fábrica de apps web ----------
+# ---------- MODO PC: app rápida ----------
 def start_app_build(chat_id, desc):
     def worker():
         try:
@@ -349,16 +379,50 @@ def start_app_build(chat_id, desc):
             save_knowledge(f"web app creada: {desc}", url)
             send_telegram(chat_id, f"🌐 APP CONSTRUIDA Y PUBLICADA\nRepo: https://github.com/{GITHUB_USERNAME}/{name}\n🔴 EN VIVO (1-2 min): {url}")
         except Exception as e:
+            save_reflection(f"app {desc[:60]}", e)
             send_telegram(chat_id, f"Error creando app: {e}")
     threading.Thread(target=worker, daemon=True).start()
 
-# ---------- MODO PC: clonar y mejorar IAs ----------
+# ---------- MODO PC: proyecto completo (MetaGPT: PM+Arq+Ing+QA) ----------
+def start_project(chat_id, desc):
+    def worker():
+        try:
+            spec = ask_groq(f"Como Product Manager: escribí 5 bullets de especificación para esta app web: {desc}. Solo bullets, sin markdown.")
+            plan = ask_groq(f"Como Arquitecto: listá uno por línea los archivos de una web app estática para: {desc}. Incluí siempre index.html, style.css, script.js. Máximo 5 líneas, solo nombres.")
+            names = [l.strip() for l in (plan or "").splitlines() if "." in l.strip()][:5]
+            if not names or "index.html" not in names:
+                names = ["index.html", "style.css", "script.js"]
+            repo = f"app-{int(time.time())}"
+            github_create_repo(repo)
+            appkey = issue_app_key(repo)
+            ctx = (f"Spec PM:\n{spec[:800]}\nApp: {desc}\n"
+                   f"Datos/IA: fetch a {SERVICE_URL}/api/data y /api/groq con key '{appkey}' y app '{repo}'.")
+            for fname in names:
+                content = clean_code(ask_groq(f"Como Ingeniero: generá el contenido COMPLETO y funcional del archivo {fname}. {ctx} Solo el contenido, sin markdown."))
+                github_push_to(repo, fname, content, f"proyecto: {fname}")
+            if "script.js" in names:
+                r = requests.get(f"https://api.github.com/repos/{GITHUB_USERNAME}/{repo}/contents/script.js", headers=gh_headers(), timeout=15)
+                if r.status_code == 200:
+                    js = base64.b64decode(r.json()["content"]).decode(errors="ignore")
+                    fixed = clean_code(ask_groq(f"Como QA: corregí bugs de sintaxis, de fetch y de eventos en este script.js ({desc}). Devolvé SOLO el JS corregido:\n{js[:6000]}"))
+                    if fixed:
+                        github_push_to(repo, "script.js", fixed, "qa: fix script")
+            enable_pages(repo)
+            url = f"https://{GITHUB_USERNAME}.github.io/{repo}/"
+            save_knowledge(f"proyecto web: {desc}", url)
+            send_telegram(chat_id, f"🏗️ PROYECTO PM+ARQ+ING+QA LISTO\nSpec:\n{spec[:500]}\n\nArchivos: {', '.join(names)}\nRepo: https://github.com/{GITHUB_USERNAME}/{repo}\n🔴 EN VIVO: {url}")
+        except Exception as e:
+            save_reflection(f"proyecto {desc[:60]}", e)
+            send_telegram(chat_id, f"Error proyecto: {e}")
+    threading.Thread(target=worker, daemon=True).start()
+
+# ---------- MODO PC: clonar y mejorar ----------
 def start_clone(chat_id, full_repo):
     def worker():
         try:
             github_fork(full_repo)
             short = full_repo.split("/")[-1]
-            send_telegram(chat_id, f"🐒 CLONADO: https://github.com/{GITHUB_USERNAME}/{short}\nAhora podés mejorarlo: mejorar {short} <ruta/archivo>")
+            send_telegram(chat_id, f"🐒 CLONADO: https://github.com/{GITHUB_USERNAME}/{short}\nAhora: mejorar {short} <ruta/archivo>")
         except Exception as e:
             send_telegram(chat_id, f"Error clonando: {e}")
     threading.Thread(target=worker, daemon=True).start()
@@ -376,18 +440,54 @@ def start_improve(chat_id, repo, path):
             ok = github_push_to(repo, path, improved, msg)
             send_telegram(chat_id, f"🔧 MEJORADO: {repo}/{path}\n{'Commit OK ✅' if ok else 'Falló el commit ❌'}\n\nAntes:\n{original[:300]}\n\nAhora:\n{improved[:600]}")
         except Exception as e:
+            save_reflection(f"mejora {repo}/{path}", e)
             send_telegram(chat_id, f"Error mejorando: {e}")
     threading.Thread(target=worker, daemon=True).start()
 
-# ---------- Cron autónomo ----------
+# ---------- AUTONOMÍA (AutoGPT-lite): turno con meta auto-elegida ----------
 CRON_TASKS = [
     "un programa que detecte si un texto es palíndromo",
     "una función que convierta Celsius a Fahrenheit y muestre una tabla",
     "un programa que calcule Fibonacci de forma eficiente",
     "un script que genere contraseñas seguras aleatorias",
-    "una función que ordene palabras por longitud y alfabéticamente",
 ]
 LAST_CRON = [0.0]
+
+def autonomous_shift():
+    chat_id = OWNER_CHAT[0]
+    try:
+        state = f"Biblioteca propia: {', '.join(sorted(CODE_LIBRARY.keys())[:12])}\nSabiduría reciente: {GLOBAL_KB[-600:]}"
+        decision = (ask_groq(
+            "Sos un agente autónomo en tu turno de trabajo. Estado actual:\n" + state +
+            "\nElegí UNA acción que más aumente tu capacidad y respondé EXACTAMENTE con uno de estos formatos:\n"
+            "EVOLUCIONAR: <task de Python concreta y testeable>\n"
+            "APP: <descripción breve de una app web útil>\n"
+            "MEJORAR: <repo tuyo> <ruta de archivo>") or "").strip()
+        up = decision.upper()
+        if up.startswith("APP:") and chat_id:
+            desc = decision.split(":", 1)[1].strip()
+            send_telegram(chat_id, f"🌙 Turno autónomo: decidí construir la app '{desc}'")
+            start_project(chat_id, desc)
+            return
+        if up.startswith("MEJORAR:") and chat_id:
+            parts = decision.split(":", 1)[1].strip().split(" ", 1)
+            if len(parts) == 2:
+                send_telegram(chat_id, f"🌙 Turno autónomo: voy a mejorar {parts[1]} en {parts[0]}")
+                start_improve(chat_id, parts[0].strip(), parts[1].strip())
+                return
+        task = decision.split(":", 1)[1].strip() if ":" in decision else CRON_TASKS[int(time.time()) % len(CRON_TASKS)]
+        code, score, ok = evolve_program(task)
+        code, out = run_and_fix(code, task)
+        name = f"evolved_{int(time.time())}.py"
+        github_push(f"evolution/{name}", code, f"[auto] evolve: {task[:40]} [skip render]")
+        CODE_LIBRARY[name[:-3]] = code
+        if ok or score >= 2.0:
+            save_knowledge(f"[auto] {task}", code[:200])
+        if chat_id:
+            send_telegram(chat_id, f"🌙 Turno autónomo: evolucioné '{task}'\nScore: {score:.2f} | ▶️ test: {out[:150]}\nUsalo: usar {name[:-3]}")
+    except Exception as e:
+        print("[auto] error:", e)
+        save_reflection("turno autónomo", e)
 
 # ---------- Seguridad y helpers ----------
 def admin_only():
@@ -406,14 +506,14 @@ def set_commands():
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands", json={"commands": [
             {"command": "start", "description": "Iniciar EVO V9"},
-            {"command": "tool", "description": "Crear una tool nueva"},
+            {"command": "tool", "description": "Crear una tool (con auto-debug)"},
             {"command": "evolucionar", "description": "Evolucionar un programa"},
             {"command": "agente", "description": "Agente multi-paso"},
-            {"command": "app", "description": "Crear y publicar una app web"},
-            {"command": "clonar", "description": "Clonar un repo/IA de GitHub"},
-            {"command": "mejorar", "description": "Mejorar un archivo clonado"},
-            {"command": "biblioteca", "description": "Ver código aprendido"},
-            {"command": "memoria", "description": "Recuerdos del chat"},
+            {"command": "app", "description": "App web rápida"},
+            {"command": "proyecto", "description": "Proyecto completo PM+Arq+Ing+QA"},
+            {"command": "clonar", "description": "Clonar un repo/IA"},
+            {"command": "mejorar", "description": "Mejorar archivo clonado"},
+            {"command": "biblioteca", "description": "Código aprendido"},
             {"command": "sabiduria", "description": "Aprendizaje global"},
         ]}, timeout=10)
     except Exception as e:
@@ -424,27 +524,16 @@ set_commands()
 # ---------- Rutas ----------
 @app.route("/")
 def home():
-    return f"EVO V9 MODO PC - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
+    return f"EVO V9 V6 AUTONOMO - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
 
 @app.route("/cron")
 def cron():
     admin_only()
     if time.time() - LAST_CRON[0] < 6 * 3600:
-        return "cron: ya evolucioné hace menos de 6h", 200
+        return "cron: ya trabajé hace menos de 6h", 200
     LAST_CRON[0] = time.time()
-    task = CRON_TASKS[int(time.time()) % len(CRON_TASKS)]
-    def worker():
-        try:
-            code, score, ok = evolve_program(task)
-            name = f"evolved_{int(time.time())}.py"
-            github_push(f"evolution/{name}", code, f"[cron] evolve: {task[:40]} [skip render]")
-            CODE_LIBRARY[name[:-3]] = code
-            if ok or score >= 2.0:
-                save_knowledge(f"[cron] {task}", code[:200])
-        except Exception as e:
-            print("[cron] error:", e)
-    threading.Thread(target=worker, daemon=True).start()
-    return "cron: evolución autónoma lanzada", 200
+    threading.Thread(target=autonomous_shift, daemon=True).start()
+    return "cron: turno autónomo lanzado", 200
 
 @app.route("/api/groq", methods=["POST"])
 def api_groq():
@@ -527,19 +616,29 @@ def telegram_webhook():
         text = (msg.get("text") or "").strip()
         if not chat_id or not text:
             return "ok", 200
+        OWNER_CHAT[0] = chat_id
         low = text.lower()
 
         if low.startswith("/start") or low == "hola":
-            send_telegram(chat_id, "🧠 EVO V9 MODO PC activo.\n/app <desc> | /clonar user/repo | /mejorar repo ruta | /evolucionar | /agente | /biblioteca | /memoria | /sabiduria")
+            send_telegram(chat_id, "🧠 EVO V9 V6 AUTÓNOMO activo.\n/proyecto <desc> | /app <desc> | /clonar user/repo | /mejorar repo ruta | /evolucionar | /agente | /biblioteca | /sabiduria")
+            return "ok", 200
+
+        if low.startswith("proyecto ") or low == "/proyecto":
+            desc = text.split(" ", 1)[1] if " " in text else ""
+            if not desc:
+                send_telegram(chat_id, "Uso: proyecto <descripción>. Ej: proyecto una calculadora con historial guardado")
+                return "ok", 200
+            start_project(chat_id, desc)
+            send_telegram(chat_id, f"🏗️ Proyecto iniciado: {desc}\nPM → Arquitecto → Ingeniero → QA. ~2-4 min.")
             return "ok", 200
 
         if low.startswith("app ") or low == "/app":
             desc = text.split(" ", 1)[1] if " " in text else ""
             if not desc:
-                send_telegram(chat_id, "Uso: app <descripción>. Ej: app una lista de tareas con contador y modo oscuro")
+                send_telegram(chat_id, "Uso: app <descripción>")
                 return "ok", 200
             start_app_build(chat_id, desc)
-            send_telegram(chat_id, f"🌐 Construyendo app: {desc}\nGenerando HTML+CSS+JS, creando repo y publicando. ~1-2 min.")
+            send_telegram(chat_id, f"🌐 Construyendo app: {desc} (~1-2 min)")
             return "ok", 200
 
         if low.startswith("clonar "):
@@ -563,7 +662,7 @@ def telegram_webhook():
         if low.startswith("ver "):
             name = text.split(" ", 1)[1].strip()
             code = CODE_LIBRARY.get(name)
-            send_telegram(chat_id, f"📄 {name}:\n{code[:3500]}" if code else f"No tengo '{name}'. Pedí /biblioteca.")
+            send_telegram(chat_id, f"📄 {name}:\n{code[:3500]}" if code else f"No tengo '{name}'.")
             return "ok", 200
 
         if low.startswith("evoluciona") or low.startswith("/evolucionar") or low.startswith("evolve"):
@@ -635,6 +734,7 @@ def telegram_webhook():
         if "tool" in low or "crea" in low or "codigo" in low:
             history = load_memory(chat_id)
             code = clean_code(ask_groq(text, history))
+            code, out = run_and_fix(code, text)
             LAST_CODE[chat_id] = code
             tool_name = f"tool_{int(time.time())}"
             github_push(f"tools/{tool_name}.py", code, f"GOD {tool_name} [skip render]")
@@ -642,7 +742,7 @@ def telegram_webhook():
             link = f"https://github.com/{GITHUB_USERNAME}/{GITHUB_REPO}/blob/main/tools/{tool_name}.py"
             save_memory(chat_id, "user", text)
             save_memory(chat_id, "assistant", f"[tool creada] {tool_name}")
-            send_telegram(chat_id, f"{tool_name}.py\n{link}\n\n{code[:2800]}\n\n▶️ 'ejecutar' | 'usar {tool_name}'")
+            send_telegram(chat_id, f"{tool_name}.py\n{link}\n\n{code[:2500]}\n\n▶️ Probada: {out[:300]}\n'usar {tool_name}' cuando quieras.")
             return "ok", 200
 
         history = load_memory(chat_id)
