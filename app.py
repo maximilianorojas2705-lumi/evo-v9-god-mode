@@ -435,7 +435,7 @@ def bump_autonomy(own):
         pass
 
 def own_answer(text):
-    gens = [g for g in genome_list() if g.get("kind") in ("solved", "crossover", "dream", "simulated") and g.get("task")]
+    gens = [g for g in genome_list() if g.get("kind") in ("solved", "crossover", "dream", "simulated", "evolved") and g.get("task")]
     tq = _tok(text)
     best = None
     for g in gens:
@@ -888,16 +888,16 @@ def selection_report(chat_id):
     if chat_id:
         send_telegram(chat_id, msg)
 
-# ---------- Núcleo profundo ----------
+# ---------- Núcleo profundo (con contrato de firma solve(n)) ----------
 def solve_hard(chat_id, problem):
     def worker():
         try:
             tests = clean_code(ask_role("juez",
-                f"Escribí SOLO líneas de assert planos (sin def, sin markdown) que verifiquen una función solve() para este problema: {problem}. Incluí 4 casos borde."))
+                f"Escribí SOLO líneas de assert planos (sin def, sin markdown) que verifiquen una función solve() para este problema: {problem}. Incluí 4 casos borde. Los asserts DEBEN llamar a solve con argumentos, por ejemplo assert solve(999)==27."))
             cands = []
             for mdl in HARD_MODELS:
                 sol = clean_code(ask_groq(
-                    f"Escribí SOLO una función Python llamada solve() que resuelva: {problem}. Plana, sin markdown, sin prints.", model=mdl))
+                    f"Escribí SOLO una función Python llamada solve que resuelva: {problem}. Recibí los datos por parámetro (ej: solve(n)). NO uses input(). NO imprimas nada. Plana, sin markdown.", model=mdl))
                 if sol:
                     cands.append((mdl, sol))
             results = []
@@ -912,11 +912,15 @@ def solve_hard(chat_id, problem):
             score, mdl, best, out = results[0]
             if score < 1.0:
                 fixed = clean_code(ask_groq(
-                    f"Esta solución falla los tests. Problema: {problem}\nCódigo:\n{best[:2500]}\nSalida:\n{out[:600]}\nDevolvé SOLO la función solve() corregida, plana."))
+                    f"Esta solución falla los tests. Problema: {problem}\nCódigo:\n{best[:2500]}\nSalida:\n{out[:600]}\nDevolvé SOLO la función solve corregida, plana, recibiendo los datos por parámetro (ej: solve(n)), sin input() y sin prints, de modo que los asserts solve(...) pasen."))
                 if fixed:
                     out2 = run_sandbox(fixed + "\n\n" + tests + "\nprint('TESTS OK')")
                     if ("TESTS OK" in out2) and ("Traceback" not in out2) and ("AssertionError" not in out2):
                         best, out, score = fixed, out2, 1.0
+            import re as _re
+            margs = _re.search(r"solve\(([^)]*)\)", tests)
+            demo_args = margs.group(1) if margs else ""
+            best = best + f"\n\nif __name__ == '__main__':\n    print(solve({demo_args}))\n"
             name = f"solved_{int(time.time())}"
             proof = (f"# PROBLEMA\n{problem}\n\n# MODELOS COMPETIDORES\n" + ", ".join(m for m, _ in cands) +
                      f"\n\n# GANADOR\n{mdl}\n\n# SOLUCIÓN\n{best}\n\n# TESTS DEL VERIFICADOR\n{tests}\n\n# RESULTADO\n{out[:800]}\n")
@@ -1136,7 +1140,7 @@ def cors(resp):
 
 @app.route("/")
 def home():
-    return f"EVO V16 NUCLEO - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
+    return f"EVO V17 AUTONOMIA - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
 
 @app.route("/cron")
 def cron():
@@ -1267,7 +1271,7 @@ def telegram_webhook():
         low = text.lower()
 
         if low.startswith("/start") or low == "hola":
-            send_telegram(chat_id, "🧠 EVO V16 NUCLEO activo.\n/resuelve | /debate | /benchmark | /piensa | /simula | /proyecto | /ui | /app | /duelo | /evolucionar | /asimilar | /biblioteca | /genoma | /diario | /autonomia")
+            send_telegram(chat_id, "🧠 EVO V17 AUTONOMIA activo.\n/resuelve | /debate | /benchmark | /piensa | /simula | /proyecto | /ui | /app | /duelo | /evolucionar | /asimilar | /biblioteca | /genoma | /diario | /autonomia")
             return "ok", 200
 
         if low.startswith("resuelve "):
