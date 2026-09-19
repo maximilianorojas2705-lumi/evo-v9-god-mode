@@ -470,7 +470,7 @@ def sense_search(q):
     import re as _re
     try:
         r = requests.get("https://es.wikipedia.org/w/api.php",
-                         params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": 3}, timeout=10)
+                         params={"action": "query", "list": "search", "srsearch": q, "format": "json", "srlimit": "3"}, timeout=10)
         out = []
         for s in (r.json().get("query", {}).get("search", []) if r.status_code == 200 else []):
             snip = _re.sub("<[^>]+>", "", s.get("snippet", ""))
@@ -888,7 +888,7 @@ def selection_report(chat_id):
     if chat_id:
         send_telegram(chat_id, msg)
 
-# ---------- Núcleo profundo (con contrato de firma solve(n)) ----------
+# ---------- Núcleo profundo ----------
 def solve_hard(chat_id, problem):
     def worker():
         try:
@@ -1007,7 +1007,7 @@ def metafit_extend(problem, solution):
     except Exception:
         pass
 
-# ---------- LAB JARVIS: simulación hasta 100% ----------
+# ---------- LAB JARVIS ----------
 def simulate_until_100(chat_id, problem, max_rounds=5):
     def worker():
         try:
@@ -1117,7 +1117,8 @@ def set_commands():
     try:
         requests.post(f"https://api.telegram.org/bot{BOT_TOKEN}/setMyCommands", json={"commands": [
             {"command": "start", "description": "Iniciar EVO V9"},
-            {"command": "piensa", "description": "Razonamiento profundo por descomposición"},
+            {"command": "movil", "description": "Enviar tarea al celular (ARTEMIS)"},
+            {"command": "piensa", "description": "Razonamiento profundo"},
             {"command": "simula", "description": "Lab: simular hasta 100%"},
             {"command": "proyecto", "description": "Proyecto PM+Arq+Ing+QA+visión"},
             {"command": "ui", "description": "Evolución de UI con fitness visual"},
@@ -1140,7 +1141,7 @@ def cors(resp):
 
 @app.route("/")
 def home():
-    return f"EVO V17 AUTONOMIA - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
+    return f"EVO V18 PUENTE - skills: {len(SKILLS)} - biblioteca: {len(CODE_LIBRARY)} - sabiduria: {len(GLOBAL_KB)} chars - memoria: {'ON' if SUPABASE_KEY else 'OFF'}", 200
 
 @app.route("/cron")
 def cron():
@@ -1271,7 +1272,38 @@ def telegram_webhook():
         low = text.lower()
 
         if low.startswith("/start") or low == "hola":
-            send_telegram(chat_id, "🧠 EVO V17 AUTONOMIA activo.\n/resuelve | /debate | /benchmark | /piensa | /simula | /proyecto | /ui | /app | /duelo | /evolucionar | /asimilar | /biblioteca | /genoma | /diario | /autonomia")
+            send_telegram(chat_id, "🧠 EVO V18 PUENTE activo.\n/movil <tarea> | /resuelve | /debate | /benchmark | /piensa | /simula | /proyecto | /ui | /app | /duelo | /evolucionar | /asimilar | /biblioteca | /genoma | /diario | /autonomia")
+            return "ok", 200
+
+        if low.startswith("movil status"):
+            try:
+                r = requests.get(f"{SUPABASE_URL}/rest/v1/artemis_queue", headers=sb_headers(),
+                                 params={"order": "created_at.desc", "limit": "5",
+                                         "select": "id,task,status,result,updated_at"}, timeout=10)
+                rows = r.json() if r.status_code == 200 else []
+                if not rows:
+                    send_telegram(chat_id, "📱 No hay tareas móviles aún.")
+                else:
+                    lines = [f"[{(row.get('status') or '').upper()}] #{row.get('id')} · {(row.get('task') or '')[:60]}\n→ {(row.get('result') or '')[:120]}" for row in rows]
+                    send_telegram(chat_id, "📱 ÚLTIMAS TAREAS MÓVILES:\n\n" + "\n\n".join(lines))
+            except Exception as e:
+                send_telegram(chat_id, f"Error consultando cola: {e}")
+            return "ok", 200
+
+        if low.startswith("movil "):
+            instruction = text.split(" ", 1)[1].strip()
+            if not instruction:
+                send_telegram(chat_id, "Uso: movil <instrucción>. Ej: movil abrir calculadora y sumar 5 mas 3")
+                return "ok", 200
+            try:
+                r = requests.post(f"{SUPABASE_URL}/rest/v1/artemis_queue", headers=sb_headers(),
+                                  json={"task": instruction, "status": "pending"}, timeout=10)
+                if r.status_code in (200, 201):
+                    send_telegram(chat_id, f"📱 Tarea encolada para tu celular:\n→ {instruction[:150]}\nEl worker de Termux la toma en ~10 s.\nConsultá con: movil status")
+                else:
+                    send_telegram(chat_id, f"Error al encolar: {r.status_code}")
+            except Exception as e:
+                send_telegram(chat_id, f"Error conectando con Supabase: {e}")
             return "ok", 200
 
         if low.startswith("resuelve "):
