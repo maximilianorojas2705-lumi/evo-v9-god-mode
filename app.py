@@ -1,4 +1,5 @@
 import os, base64, time, glob, importlib.util, subprocess, sys, threading, secrets, requests
+from memoria_sem import recordar as recordar_sem
 from flask import Flask, request, abort, jsonify
 
 app = Flask(__name__)
@@ -350,6 +351,14 @@ def ask_groq(prompt, history=None, model=None):
         system += f"\nConocimiento de tus cerebros fusionados:\n{BRAIN_CONTEXT}"
     if GLOBAL_KB:
         system += f"\nCosas que YA aprendiste en evoluciones anteriores (usalas):\n{GLOBAL_KB}"
+    # Memoria semantica: recuerdos por significado (pgvector + Gemini embeddings)
+    try:
+        recuerdos_sem = recordar_sem(prompt, limite=3)
+        if recuerdos_sem:
+            system += "\n\nRecuerdos relevantes por significado (usa estos si son pertinentes):\n" + recuerdos_sem
+    except Exception as e:
+        print(f"[mem_sem] fallo al recordar: {e}")
+
     messages = [{"role": "system", "content": system}]
     for m in (history or []):
         role = m.get("role")
@@ -1574,3 +1583,13 @@ def telegram_webhook():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+
+
+# ---------- Memoria semantica: guardar despues de cada interaccion ----------
+def save_semantic_memory(content, fuente="chat"):
+    """Guarda un recuerdo en memoria_vec. Falla en silencio."""
+    try:
+        from memoria_sem import guardar
+        guardar(content, fuente=fuente)
+    except Exception as e:
+        print(f"[mem_sem] fallo al guardar: {e}")
