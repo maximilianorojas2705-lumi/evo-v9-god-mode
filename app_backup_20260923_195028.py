@@ -268,38 +268,21 @@ def send_photo(chat_id, png, caption):
         print("[tg] photo error:", e)
 
 def ask_vision(prompt, png_b64):
-    if not GEMINI_KEY:
-        print("[vision] GEMINI_KEY no configurada")
+    if not GROQ_API_KEY:
         return ""
+    from groq import Groq
+    client = Groq(api_key=GROQ_API_KEY)
     try:
-        import requests
-        # Extraer solo el base64 (sin el data:image/... prefix si existe)
-        if png_b64.startswith("data:"):
-            png_b64 = png_b64.split(",", 1)[1]
-        
-        r = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}",
-            json={
-                "contents": [{
-                    "parts": [
-                        {"text": prompt},
-                        {"inline_data": {"mime_type": "image/png", "data": png_b64}}
-                    ]
-                }]
-            },
-            timeout=60
-        )
-        
-        if r.status_code == 200:
-            data = r.json()
-            return data["candidates"][0]["content"]["parts"][0]["text"]
-        else:
-            print(f"[vision] Gemini error {r.status_code}: {r.text[:100]}")
-            return ""
+        c = client.chat.completions.create(
+            model=ROLE_MODEL["vision"],
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{png_b64}"}}]}],
+            max_tokens=800)
+        return c.choices[0].message.content or ""
     except Exception as e:
-        print(f"[vision] error: {str(e)[:150]}")
+        print("[vision] error:", str(e)[:150])
         return ""
-
 
 # ---------- GitHub ----------
 def gh_headers():
