@@ -279,7 +279,7 @@ def ask_vision(prompt, png_b64):
             png_b64 = png_b64.split(",", 1)[1]
         
         r = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={GEMINI_KEY}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_KEY}",
             json={
                 "contents": [{
                     "parts": [
