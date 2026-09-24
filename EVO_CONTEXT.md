@@ -18,3 +18,10 @@
 - Test exitoso: STATUS 200, descripción precisa de imagen de prueba
 - Anti-fragil: si un modelo muere, pregunta al siguiente automáticamente
 - Lección aprendida: nunca hardcodear modelos (Groq mató llama-4-scout, Google mató 1.5-flash y 2.5-flash en el mismo día)
+
+## 2026-09-24 00:10: Manos ADB = NULO por ahora (heladera)
+- adb pair Termux: bug binario arm64 (protocol fault), Google issue 329947334
+- LADB v2.6 (checksum verificado OK): pairing no completa en A04, "shell is dead"
+- Decision: no bloquear el organismo por manos; avanzar sin ellas
+- Proximo intento (de dia): Shizuku (Play Store) o PC + copia de adbkey a Termux
+- Leccion guardada en tabla reflections
