@@ -1,0 +1,6 @@
+nohup: ignoring input
+[evo] skills: 3 | biblioteca: 24 | context: 6443 chars
+ * Serving Flask app 'app'
+ * Debug mode: off
+Address already in use
+Port 10000 is in use by another program. Either identify and stop that program, or start the server with a different port.

@@ -25,3 +25,10 @@
 - Decision: no bloquear el organismo por manos; avanzar sin ellas
 - Proximo intento (de dia): Shizuku (Play Store) o PC + copia de adbkey a Termux
 - Leccion guardada en tabla reflections
+
+## 2026-09-25 19:15: Migracion Render completada
+- Cuenta vieja: proyecto borrado (limite free agotado)
+- Cuenta nueva: Lumina's workspace
+- URL nueva: https://evo-v9-god-mode.onrender.com
+- 10 variables migradas, SIN BOT_TOKEN (bot vive en Termux por polling)
+- Scripts locales actualizados a la URL nueva
