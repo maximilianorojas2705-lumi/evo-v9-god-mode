@@ -1591,8 +1591,6 @@ def telegram_webhook():
         print("[telegram] error:", e)
     return "ok", 200
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
 
 
 # ---------- Memoria semantica: guardar despues de cada interaccion ----------
@@ -1627,3 +1625,6 @@ def vision_endpoint():
 def rutas_diag():
     from flask import jsonify
     return jsonify([str(r) for r in app.url_map.iter_rules()])
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
