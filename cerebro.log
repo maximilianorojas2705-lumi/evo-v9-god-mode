@@ -17,3 +17,4 @@
  * Running on http://192.168.1.35:10000
 [33mPress CTRL+C to quit[0m
 127.0.0.1 - - [24/Sep/2026 15:07:40] "GET / HTTP/1.1" 200 -
+127.0.0.1 - - [24/Sep/2026 19:57:50] "[33mPOST /vision HTTP/1.1[0m" 404 -

@@ -1622,3 +1622,8 @@ def vision_endpoint():
         return jsonify({"answer": respuesta})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/rutas")
+def rutas_diag():
+    from flask import jsonify
+    return jsonify([str(r) for r in app.url_map.iter_rules()])
