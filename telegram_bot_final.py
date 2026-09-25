@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os, sys, time, requests, base64, json, traceback
+from urllib.parse import quote_plus
 from datetime import datetime
 
 def _secrets():
@@ -208,9 +209,18 @@ def procesar_comando(chat_id, texto):
                 if r.status_code == 200:
                     resp = r.json()["choices"][0]["message"]["content"]
                     return enviar(chat_id, f"🤔 *{tema}:*\n\n{resp}")
-            except:
-                pass
-        enviar(chat_id, "⚠️ Error")
+            except Exception as e:
+                return enviar(chat_id, f"⚠️ Error: {str(e)[:100]}")
+        enviar(chat_id, "⚠️ GROQ no configurado")
+    elif cmd == "/busca":
+        query = " ".join(texto.split()[1:])
+        cmd_busca(chat_id, query)
+    elif cmd == "/lee":
+        url = texto.split()[1] if len(texto.split()) > 1 else ""
+        cmd_lee(chat_id, url)
+    elif cmd == "/wiki":
+        query = " ".join(texto.split()[1:])
+        cmd_wiki(chat_id, query)
     else:
         enviar(chat_id, f"Comando desconocido: {cmd}")
 
@@ -265,6 +275,67 @@ def procesar_audio(chat_id, file_id):
 
 offset = 0
 print("🔄 Escuchando...")
+# ========== SKILL WEB (agregado 25-sep-2026) ==========
+import sys
+sys.path.insert(0, '/data/data/com.termux/files/home/evo-brain')
+from web_tools import buscar, leer_url, wiki_search
+
+def cmd_busca(chat_id, query):
+    """Busca en la web y devuelve links."""
+    if not query:
+        return enviar(chat_id, "Uso: /busca <tema>")
+    rs = buscar(query, n=4)
+    if not rs:
+        return enviar(chat_id, f"❌ No encontré resultados para '{query}'")
+    msg = f"🔎 Resultados para '{query}':\n\n"
+    for i, r in enumerate(rs, 1):
+        msg += f"{i}. [{r['title'][:50]}]({r['href']})\n\n"
+    enviar(chat_id, msg, parse_mode="Markdown")
+
+def cmd_lee(chat_id, url):
+    """Lee y resume una URL."""
+    if not url:
+        return enviar(chat_id, "Uso: /lee <url>")
+    enviar(chat_id, f"📖 Leyendo {url[:50]}...")
+    texto = leer_url(url, max_chars=6000)
+    if not texto:
+        return enviar(chat_id, "❌ No pude leer la URL")
+    # Resumen con Groq
+    try:
+        from app import groq_chat
+        resumen = groq_chat(
+            f"Resumi en 3-4 frases el siguiente contenido:\n\n{texto[:4000]}",
+            system="Sos EVO. Resumis contenido web de forma clara y util."
+        )
+        enviar(chat_id, f"📖 Resumen:\n\n{resumen}")
+    except Exception as e:
+        enviar(chat_id, f"📖 Contenido ({len(texto)} chars):\n\n{texto[:1500]}")
+
+def cmd_wiki(chat_id, query):
+    if not query:
+        return enviar(chat_id, "Uso: /wiki <tema>")
+    enviar(chat_id, f"📚 Buscando '{query}' en Wikipedia...")
+    rs = wiki_search(query, n=1)
+    if not rs:
+        return enviar(chat_id, f"❌ Wikipedia no devolvio resultados para '{query}' (status: ver logs)")
+    texto = leer_url(rs[0]["href"], max_chars=6000)
+    if not texto or len(texto) < 200:
+        return enviar(chat_id, f"❌ No pude leer el artículo de '{query}'")
+    if GROQ:
+        try:
+            r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ}"},
+                json={"model": "openai/gpt-oss-120b",
+                      "messages": [
+                          {"role": "system", "content": "Sos EVO. Explicás temas de Wikipedia de forma clara, en 3-5 parrafos."},
+                          {"role": "user", "content": f"Basado en este articulo, explica '{query}':\n\n{texto[:4000]}"}],
+                      "max_tokens": 800}, timeout=60)
+            if r.status_code == 200:
+                resp = r.json()["choices"][0]["message"]["content"]
+                return enviar(chat_id, f"📚 *{rs[0]['title']}*\n\n{resp}")
+        except Exception as e:
+            print(f"[wiki] groq fallo: {e}")
+    enviar(chat_id, f"📚 *{rs[0]['title']}*\n\n{texto[:1500]}")
 while True:
     try:
         r = requests.get(f"{TELE}/getUpdates",
@@ -293,3 +364,4 @@ while True:
         break
     except:
         time.sleep(3)
+
