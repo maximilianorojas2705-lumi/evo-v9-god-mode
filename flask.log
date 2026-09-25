@@ -7,8 +7,5 @@ nohup: ignoring input
  * Running on http://127.0.0.1:10000
  * Running on http://192.168.1.35:10000
 [33mPress CTRL+C to quit[0m
-127.0.0.1 - - [24/Sep/2026 22:03:40] "POST /vision HTTP/1.1" 200 -
-127.0.0.1 - - [24/Sep/2026 22:04:08] "POST /vision HTTP/1.1" 200 -
-127.0.0.1 - - [24/Sep/2026 22:06:00] "POST /vision HTTP/1.1" 200 -
-127.0.0.1 - - [24/Sep/2026 22:14:52] "POST /vision HTTP/1.1" 200 -
-127.0.0.1 - - [24/Sep/2026 22:25:44] "POST /vision HTTP/1.1" 200 -
+127.0.0.1 - - [25/Sep/2026 00:57:57] "POST /vision HTTP/1.1" 200 -
+127.0.0.1 - - [25/Sep/2026 00:58:44] "POST /vision HTTP/1.1" 200 -
