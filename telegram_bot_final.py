@@ -106,6 +106,9 @@ def procesar_texto(chat_id, texto):
     enviar_typing(chat_id)
     if texto.startswith("/"):
         return procesar_comando(chat_id, texto)
+    if texto.lower().startswith(("recordá que", "recorda que", "acordate que", "acordate de")):
+        guardar_recuerdo(chat_id, texto, importancia=3)
+        return enviar(chat_id, f"💾 Anotado para siempre: {texto[:100]}")
     guardar_memoria(chat_id, texto, tipo="usuario")
     if chat_id not in contextos:
         contextos[chat_id] = []
@@ -115,8 +118,13 @@ def procesar_texto(chat_id, texto):
     recuerdos = buscar_memoria(texto, limit=3)
     contexto_memoria = ""
     if recuerdos:
-        contexto_memoria = "Recuerdos relevantes:\n"
+        contexto_memoria = "Recuerdos de conversacion reciente:\n"
         for rec in recuerdos:
+            contexto_memoria += f"- {rec['contenido'][:150]}\n"
+    recuerdos_largo = buscar_recuerdos(chat_id, texto, limit=3)
+    if recuerdos_largo:
+        contexto_memoria += "\nRecuerdos importantes del usuario (usarlos si aplican):\n"
+        for rec in recuerdos_largo:
             contexto_memoria += f"- {rec['contenido'][:150]}\n"
     mensajes = [{
         "role": "system",
@@ -164,7 +172,7 @@ def procesar_comando(chat_id, texto):
             "/memoria - recuerdos\n"
             "/reflexion - lecciones\n"
             "/status - estado\n"
-            "/piensa <tema> - reflexion\n\n"
+            "/piensa <tema> - reflexion\n" "/remember <algo> - guardar recuerdo\n" "/recall <texto> - buscar recuerdos\n" "/memories - ver recuerdos\n" "/wiki <tema> - Wikipedia\n" "/busca <tema> - buscar web\n" "/lee <url> - leer pagina\n\n"
             "O hablame normal, recuerdo todo.")
     elif cmd == "/status":
         return enviar(chat_id,
@@ -221,6 +229,12 @@ def procesar_comando(chat_id, texto):
     elif cmd == "/wiki":
         query = " ".join(texto.split()[1:])
         cmd_wiki(chat_id, query)
+    elif cmd == "/remember":
+        cmd_remember(chat_id, " ".join(texto.split()[1:]))
+    elif cmd == "/recall":
+        cmd_recall(chat_id, " ".join(texto.split()[1:]))
+    elif cmd == "/memories":
+        cmd_memories(chat_id)
     else:
         enviar(chat_id, f"Comando desconocido: {cmd}")
 
@@ -336,6 +350,36 @@ def cmd_wiki(chat_id, query):
         except Exception as e:
             print(f"[wiki] groq fallo: {e}")
     enviar(chat_id, f"📚 *{rs[0]['title']}*\n\n{texto[:1500]}")
+
+# ========== MEMORIA PERSISTENTE ==========
+from memoria_persistente import guardar_recuerdo, buscar_recuerdos, ultimos_recuerdos
+
+def cmd_remember(chat_id, texto):
+    if not texto:
+        return enviar(chat_id, "Uso: /remember <algo importante>")
+    ok = guardar_recuerdo(chat_id, texto, importancia=2)
+    enviar(chat_id, f"💾 Guardado: {texto[:100]}" if ok else "❌ Error guardando recuerdo")
+
+def cmd_recall(chat_id, query):
+    if not query:
+        return enviar(chat_id, "Uso: /recall <busqueda>")
+    rs = buscar_recuerdos(chat_id, query, limit=5)
+    if not rs:
+        return enviar(chat_id, f"🤔 No encontré recuerdos sobre '{query}'")
+    msg = f"🔍 Recuerdos sobre '{query}':\n\n"
+    for i, r in enumerate(rs, 1):
+        msg += f"{i}. {r['contenido'][:120]} ({r['creado_at'][:10]})\n"
+    enviar(chat_id, msg)
+
+def cmd_memories(chat_id):
+    rs = ultimos_recuerdos(chat_id, limit=10)
+    if not rs:
+        return enviar(chat_id, "📭 Todavía no tenés recuerdos guardados")
+    msg = "💾 Tus recuerdos:\n\n"
+    for i, r in enumerate(rs, 1):
+        msg += f"{i}. {r['contenido'][:100]} ({r['creado_at'][:10]})\n"
+    enviar(chat_id, msg)
+
 while True:
     try:
         r = requests.get(f"{TELE}/getUpdates",
