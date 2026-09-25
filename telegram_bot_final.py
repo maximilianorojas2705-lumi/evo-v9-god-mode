@@ -218,16 +218,25 @@ def procesar_foto(chat_id, file_id, caption):
     enviar_typing(chat_id)
     try:
         fi = requests.get(f"{TELE}/getFile", params={"file_id": file_id}, timeout=8).json()
-        foto = requests.get(f"{TELE}/file/{fi['result']['file_path']}", timeout=20).content
+        if not fi.get("ok"):
+            print(f"[foto] getFile fallo: {fi}")
+            return enviar(chat_id, f"❌ No pude obtener la foto: {fi.get('description','error')}")
+        foto = requests.get(f"https://api.telegram.org/file/bot{BOT}/{fi['result']['file_path']}", timeout=20).content
+        if not foto.startswith(b'\xff\xd8\xff') and not foto.startswith(b'\x89PNG'):
+            print(f"[foto] no es imagen, primeros bytes: {foto[:50]}")
+            return enviar(chat_id, "❌ La descarga no devolvio una imagen valida")
+        open('/sdcard/evo_last_photo.jpg','wb').write(foto)
+        print(f'[foto] {len(foto)} bytes guardados')
         b64 = base64.b64encode(foto).decode()
         r = requests.post(VISION_LOCAL,
             json={"image": b64, "prompt": caption or "Describi lo que ves"},
-            timeout=60)
+            timeout=120)
         if r.status_code == 200:
             data = r.json()
             resp = (data.get("answer") or data.get("respuesta") or
                     data.get("decision") or data.get("descripcion") or
                     str(data)[:300])
+            print(f"[vision-bot] status={r.status_code} answer_len={len(str(resp))}")
             enviar(chat_id, f"👁️ {resp}")
         else:
             enviar(chat_id, f"❌ Vision: {r.status_code}")
@@ -240,7 +249,7 @@ def procesar_audio(chat_id, file_id):
     enviar_typing(chat_id)
     try:
         fi = requests.get(f"{TELE}/getFile", params={"file_id": file_id}, timeout=8).json()
-        audio = requests.get(f"{TELE}/file/{fi['result']['file_path']}", timeout=25).content
+        audio = requests.get(f"https://api.telegram.org/file/bot{BOT}/{fi['result']['file_path']}", timeout=25).content
         r = requests.post("https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {GROQ}"},
             files={"file": ("a.ogg", audio, "audio/ogg")},

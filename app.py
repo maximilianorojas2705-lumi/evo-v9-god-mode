@@ -283,12 +283,15 @@ def ask_vision(prompt, png_b64):
                 f"https://generativelanguage.googleapis.com/v1beta/models/{modelo}:generateContent?key={GEMINI_KEY}",
                 json={"contents": [{"parts": [
                     {"text": prompt},
-                    {"inline_data": {"mime_type": "image/png", "data": png_b64}}]}]},
+                    {"inline_data": {"mime_type": ("image/png" if png_b64.startswith("iVBOR") else "image/jpeg"), "data": png_b64}}]}]},
                 timeout=60)
             if r.status_code == 200:
-                return r.json()["candidates"][0]["content"]["parts"][0]["text"]
+                parts = r.json()["candidates"][0]["content"].get("parts", [])
+                texto = "".join(p.get("text", "") for p in parts)
+                print(f"[vision] {modelo} OK len={len(texto)}")
+                return texto
             ultimo_error = f"{modelo}: {r.status_code}"
-            print(f"[vision] {modelo} fallo ({r.status_code}), probando siguiente...")
+            print(f"[vision] {modelo} fallo ({r.status_code}): {r.text[:200]}")
         except Exception as e:
             ultimo_error = f"{modelo}: {str(e)[:80]}"
     print(f"[vision] todos los modelos fallaron: {ultimo_error}")
