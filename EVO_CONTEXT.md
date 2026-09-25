@@ -74,3 +74,35 @@
 - Matar zombies antes de juzgar código
 - Auditar modelos vivos
 - Guardar foto cruda para reproducir bugs
+
+## 2026-09-25 12:30: MEMORIA PERSISTENTE OPERATIVA
+
+### Lo que se logró:
+- **Tabla memories en Supabase**: recuerdos de largo plazo con importancia y fecha
+- **Módulo memoria_persistente.py**: guardar/buscar/listar recuerdos
+- **Comandos del bot**:
+  - `/remember <algo>` - guardar recuerdo manualmente
+  - `/recall <busqueda>` - buscar recuerdos
+  - `/memories` - ver últimos 10 recuerdos
+- **Auto-captura**: frases que empiezan con "recordá que..." se guardan automáticamente
+- **Inyección de contexto**: antes de cada respuesta, EVO busca recuerdos relevantes y los usa
+
+### Bugs encontrados y resueltos:
+1. Falta de SUPABASE_URL en .secrets
+2. URL duplicada (.supabase.co.supabase.co)
+3. Tabla memories no existía (creada manualmente en Supabase dashboard)
+4. Fallback por palabras no limpiaba puntuación ("cumpleaños?" no matcheaba)
+5. Funciones de memoria agregadas después del loop (nunca se ejecutaban)
+6. Bloque de inyección de contexto con formato diferente al esperado
+
+### Lección clave:
+La memoria persistente transforma a EVO de un pez con memoria de 3 segundos a una criatura que recuerda cumpleaños, preferencias y datos importantes del usuario sin que se los pidan explícitamente.
+
+### Estado actual del organismo:
+- 👁️ Visión: operativa
+- 🗣️ Voz: operativa
+- 🧠 Memoria conversación: operativa (8 msgs)
+- 🧠 Memoria persistente: operativa (Supabase)
+- 🕷️ Web: operativa (búsqueda + lectura)
+- 🤖 Razonamiento: operativo (Groq + Gemini)
+- 🔄 Reflexión: operativa

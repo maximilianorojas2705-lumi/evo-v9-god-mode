@@ -172,7 +172,8 @@ def procesar_comando(chat_id, texto):
             "/memoria - recuerdos\n"
             "/reflexion - lecciones\n"
             "/status - estado\n"
-            "/piensa <tema> - reflexion\n" "/remember <algo> - guardar recuerdo\n" "/recall <texto> - buscar recuerdos\n" "/memories - ver recuerdos\n" "/wiki <tema> - Wikipedia\n" "/busca <tema> - buscar web\n" "/lee <url> - leer pagina\n\n"
+            "/piensa <tema> - reflexion\n" "/remember <algo> - guardar recuerdo\n" "/recall <texto> - buscar recuerdos\n" "/memories - ver recuerdos\n" "/wiki <tema> - Wikipedia\n" "/busca <tema> - buscar web\n" "/lee <url> - leer pagina\n" "/clima <ciudad> - pronóstico del tiempo\n" "/dolar [tipo] - cotizaciones\n" "/noticias [tema] - titulares\n" "/remind <tiempo> <msg> - recordatorio\n"
+         "/ocr - extraer texto de foto\n\n"
             "O hablame normal, recuerdo todo.")
     elif cmd == "/status":
         return enviar(chat_id,
@@ -235,11 +236,50 @@ def procesar_comando(chat_id, texto):
         cmd_recall(chat_id, " ".join(texto.split()[1:]))
     elif cmd == "/memories":
         cmd_memories(chat_id)
+    elif cmd == "/clima":
+        ciudad = " ".join(texto.split()[1:]) or "Buenos Aires"
+        enviar(chat_id, clima(ciudad))
+    elif cmd == "/dolar":
+        tipo = " ".join(texto.split()[1:]) if len(texto.split()) > 1 else None
+        enviar(chat_id, dolar(tipo))
+    elif cmd == "/noticias":
+        tema = " ".join(texto.split()[1:]) if len(texto.split()) > 1 else None
+        enviar(chat_id, noticias(tema, limit=5))
+    elif cmd == "/remind":
+        partes = texto.split(maxsplit=2)
+        if len(partes) < 3:
+            enviar(chat_id, "Uso: /remind <tiempo> <mensaje>\n\nEjemplos:\n• /remind 2h revisar correo\n• /remind 30m tomar agua\n• /remind 14/03 cumpleaños de Maxi\n• /remind 14/03 15:00 reunión")
+        else:
+            tiempo_str = partes[1]
+            mensaje = partes[2]
+            tiempo = parsear_tiempo(tiempo_str)
+            if tiempo:
+                ok, msg = programar_recordatorio(chat_id, mensaje, tiempo)
+                enviar(chat_id, msg)
+            else:
+                enviar(chat_id, f"❌ Formato de tiempo inválido: '{tiempo_str}'\n\nFormatos válidos:\n• 2h, 30m, 1d (relativo)\n• 14/03, 14/03 15:00 (fecha)")
+    elif cmd == "/ocr":
+        ruta = '/sdcard/evo_last_photo.jpg'
+        if not os.path.exists(ruta):
+            enviar(chat_id, "❌ Todavía no recibí ninguna foto. Mandame una y después /ocr")
+        else:
+            enviar(chat_id, "🔍 Procesando última foto con OCR...")
+            texto = extraer_texto_local(ruta)
+            if texto and not texto.startswith('❌'): texto = limpiar_ocr(texto)
+            if texto and not texto.startswith("❌"):
+                enviar(chat_id, f"📝 *Texto extraído:*\n\n{texto[:4000]}")
+            else:
+                enviar(chat_id, texto or "⚠️ No encontré texto en la foto")
     else:
         enviar(chat_id, f"Comando desconocido: {cmd}")
 
 def procesar_foto(chat_id, file_id, caption):
     enviar_typing(chat_id)
+    if caption and caption.lower().strip() == "/ocr":
+        enviar(chat_id, "🔍 Procesando imagen con OCR...")
+        texto = extraer_texto_desde_file_id(BOT, file_id)
+        if texto and not texto.startswith('❌'): texto = limpiar_ocr(texto)
+        return enviar(chat_id, f"📝 *Texto extraído:*\n\n{texto[:4000]}")
     try:
         fi = requests.get(f"{TELE}/getFile", params={"file_id": file_id}, timeout=8).json()
         if not fi.get("ok"):
@@ -379,6 +419,34 @@ def cmd_memories(chat_id):
     for i, r in enumerate(rs, 1):
         msg += f"{i}. {r['contenido'][:100]} ({r['creado_at'][:10]})\n"
     enviar(chat_id, msg)
+
+
+# ========== APIs ÚTILES ==========
+from apis_utiles import clima, dolar, noticias
+
+
+# ========== RECORDATORIOS ==========
+from recordatorios import programar_recordatorio, parsear_tiempo
+from ocr_tools import extraer_texto_desde_file_id, extraer_texto_local
+
+
+def limpiar_ocr(texto):
+    """Groq corrige los errores tipicos del OCR."""
+    if not GROQ or not texto or len(texto) < 30:
+        return texto
+    try:
+        r = requests.post("https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ}"},
+            json={"model": "openai/gpt-oss-120b",
+                  "messages": [
+                      {"role": "system", "content": "Corregis texto extraido por OCR de una foto. Corregi errores obvios de reconocimiento, ordena las lineas y devolve SOLO el texto corregido, sin comentarios."},
+                      {"role": "user", "content": texto[:3000]}],
+                  "max_tokens": 1200}, timeout=45)
+        if r.status_code == 200:
+            return r.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"[ocr] limpieza fallo: {e}")
+    return texto
 
 while True:
     try:

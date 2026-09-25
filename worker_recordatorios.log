@@ -1,0 +1,7 @@
+nohup: ignoring input
+🕐 Worker de recordatorios iniciado
+   Revisando cada 60 segundos...
+   Ctrl+C para detener
+
+[worker] 15:14:39 - Enviando recordatorio a 5609408221: probar recordatorio...
+[worker] ⚠️ Recordatorio enviado pero no marcado
