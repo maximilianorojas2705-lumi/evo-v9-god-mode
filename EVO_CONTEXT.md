@@ -56,3 +56,21 @@
 - Matar procesos zombie antes de juzgar código
 - Auditar cadenas de fallback contra modelos vivos
 - Guardar foto cruda a disco para reproducir bugs por CLI
+
+## 2026-09-24 20:50: VISIÓN POR TELEGRAM OPERATIVA (cierre debugging 14h)
+
+### Lo que se logró hoy:
+- **Migración de Render**: cuenta vieja suspendida → cuenta nueva con horas free
+- **Bot 100% local**: polling en Termux, sin webhook
+- **Fix guard __main__**: movido al final de app.py
+- **Fix URL descarga**: /file/bot<TOKEN>/ en vez de /bot<TOKEN>/file/
+- **Validación magic bytes**: verifica descargas reales
+- **Cadena de modelos**: gemini-3-flash-preview al frente
+- **Visión completa**: foto → Telegram → Gemini → descripción
+
+### Lecciones en Reflexion:
+- Verificar rutas con /rutas
+- Validar magic bytes
+- Matar zombies antes de juzgar código
+- Auditar modelos vivos
+- Guardar foto cruda para reproducir bugs
