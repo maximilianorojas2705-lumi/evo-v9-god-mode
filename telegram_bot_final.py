@@ -224,7 +224,11 @@ def procesar_foto(chat_id, file_id, caption):
             json={"image": b64, "prompt": caption or "Describi lo que ves"},
             timeout=60)
         if r.status_code == 200:
-            enviar(chat_id, f"👁️ {r.json().get('answer', '')}")
+            data = r.json()
+            resp = (data.get("answer") or data.get("respuesta") or
+                    data.get("decision") or data.get("descripcion") or
+                    str(data)[:300])
+            enviar(chat_id, f"👁️ {resp}")
         else:
             enviar(chat_id, f"❌ Vision: {r.status_code}")
     except:

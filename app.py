@@ -275,7 +275,7 @@ def ask_vision(prompt, png_b64):
     import requests
     if png_b64.startswith("data:"):
         png_b64 = png_b64.split(",", 1)[1]
-    modelos = ["gemini-3.6-flash", "gemini-flash-latest", "gemini-3.5-flash", "gemini-2.5-flash"]
+    modelos = ["gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash-preview-04-17", "gemini-2.0-flash-001"]
     ultimo_error = ""
     for modelo in modelos:
         try:
