@@ -9,3 +9,4 @@ nohup: ignoring input
 [33mPress CTRL+C to quit[0m
 127.0.0.1 - - [25/Sep/2026 00:57:57] "POST /vision HTTP/1.1" 200 -
 127.0.0.1 - - [25/Sep/2026 00:58:44] "POST /vision HTTP/1.1" 200 -
+127.0.0.1 - - [25/Sep/2026 01:05:37] "GET / HTTP/1.1" 200 -
