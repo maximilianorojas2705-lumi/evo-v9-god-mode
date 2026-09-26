@@ -1,3 +1,4 @@
+import skills_markdown
 #!/usr/bin/env python3
 import os, sys, time, requests, base64, json, traceback
 from urllib.parse import quote_plus
@@ -104,6 +105,10 @@ def buscar_memoria(query, limit=3):
 
 def procesar_texto(chat_id, texto):
     enviar_typing(chat_id)
+    try:
+        open(os.path.expanduser('~/evo-brain/ultimo_chat.txt'), 'w').write(str(chat_id))
+    except Exception:
+        pass
     if texto.startswith("/"):
         return procesar_comando(chat_id, texto)
     if texto.lower().startswith(("recordá que", "recorda que", "acordate que", "acordate de")):
@@ -270,6 +275,26 @@ def procesar_comando(chat_id, texto):
                 enviar(chat_id, f"📝 *Texto extraído:*\n\n{texto[:4000]}")
             else:
                 enviar(chat_id, texto or "⚠️ No encontré texto en la foto")
+    elif cmd == "/plan":
+        partes = texto.split("|")
+        if len(partes) < 2:
+            enviar(chat_id, "Uso: /plan titulo | paso1 | paso2 | ...")
+        else:
+            titulo = partes[0].replace("/plan", "", 1).strip()
+            pasos = [p.strip() for p in partes[1:] if p.strip()]
+            p = crear_plan(chat_id, titulo, pasos)
+            enviar(chat_id, vista_plan(p) if p else "❌ Error creando plan")
+    elif cmd == "/planes":
+        ps = planes_activos(chat_id)
+        enviar(chat_id, "\n\n".join(vista_plan(p) for p in ps) if ps else "📭 No tenés planes en curso")
+    elif cmd == "/paso":
+        args = texto.split()[1:]
+        if args and args[0].isdigit():
+            p = avanzar_plan(int(args[0]))
+        else:
+            ps = planes_activos(chat_id)
+            p = avanzar_plan(ps[0]["id"]) if ps else None
+        enviar(chat_id, vista_plan(p) if p else "❌ No hay planes activos para avanzar")
     else:
         enviar(chat_id, f"Comando desconocido: {cmd}")
 
@@ -428,6 +453,7 @@ from apis_utiles import clima, dolar, noticias
 # ========== RECORDATORIOS ==========
 from recordatorios import programar_recordatorio, parsear_tiempo
 from ocr_tools import extraer_texto_desde_file_id, extraer_texto_local
+from planes import crear_plan, planes_activos, avanzar_plan, vista_plan
 
 
 def limpiar_ocr(texto):
@@ -447,6 +473,20 @@ def limpiar_ocr(texto):
     except Exception as e:
         print(f"[ocr] limpieza fallo: {e}")
     return texto
+
+# Reanudar planes pendientes (poder Manus)
+try:
+    _uc = os.path.expanduser('~/evo-brain/ultimo_chat.txt')
+    if os.path.exists(_uc):
+        _chat = open(_uc).read().strip()
+        if _chat:
+            _ps = planes_activos(_chat)
+            if _ps:
+                enviar(_chat, "🗺️ *Retomando donde quedamos:*\n\n" +
+                       "\n\n".join(vista_plan(p) for p in _ps[:3]))
+                print(f"[planes] avisados {len(_ps)} planes pendientes")
+except Exception as e:
+    print(f"[planes] arranque: {e}")
 
 while True:
     try:

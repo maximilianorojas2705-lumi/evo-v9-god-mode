@@ -5,3 +5,19 @@ nohup: ignoring input
 
 [worker] 15:14:39 - Enviando recordatorio a 5609408221: probar recordatorio...
 [worker] ⚠️ Recordatorio enviado pero no marcado
+[recordatorios] error obteniendo vencidos: HTTPSConnectionPool(host='eqddscjgvsphzizobyef.supabase.co', port=443): Read timed out. (read timeout=10)
+nohup: ignoring input
+nohup: ignoring input
+🕐 Worker de recordatorios iniciado🕐 Worker de recordatorios iniciado
+
+   Revisando cada 60 segundos...   Revisando cada 60 segundos...
+
+   Ctrl+C para detener
+   Ctrl+C para detener
+
+
+nohup: ignoring input
+🕐 Worker de recordatorios iniciado
+   Revisando cada 60 segundos...
+   Ctrl+C para detener
+

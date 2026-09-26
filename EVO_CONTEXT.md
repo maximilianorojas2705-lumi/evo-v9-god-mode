@@ -106,3 +106,74 @@ La memoria persistente transforma a EVO de un pez con memoria de 3 segundos a un
 - 🕷️ Web: operativa (búsqueda + lectura)
 - 🤖 Razonamiento: operativo (Groq + Gemini)
 - 🔄 Reflexión: operativa
+
+## 2026-09-25 DIA COMPLETO: 7 sentidos + APIs + recordatorios
+
+### Logros del día (01:00 - 15:30):
+
+#### Memoria persistente (Supabase)
+- Tabla `memories` con campos: user_id, contenido, importancia, creado_at, recordar_en, enviado
+- Módulo `memoria_persistente.py`: guardar/buscar/listar recuerdos
+- Comandos: `/remember`, `/recall`, `/memories`
+- Auto-captura: frases "recordá que..." se guardan automáticamente
+- **Inyección de contexto**: antes de cada respuesta, busca recuerdos relevantes en Supabase y los inyecta en el system prompt de Groq
+- Bug resuelto: limpieza de puntuación en fallback por palabras
+
+#### APIs útiles (sin keys)
+- `/clima <ciudad>`: Open-Meteo API (gratis, sin key)
+- `/dolar [tipo]`: DolarAPI (oficial, blue, bolsa, CCL, tarjeta, cripto)
+- `/noticias [tema]`: RSS feeds de Clarín, La Nación, Infobae
+- Módulo `apis_utiles.py`
+
+#### Recordatorios programados
+- Tabla `memories` extendida con `recordar_en` (TIMESTAMPTZ) y `enviado` (BOOLEAN)
+- Módulo `recordatorios.py`: parsear tiempos (2h, 30m, 1d, 14/03, 14/03 15:00)
+- Comando `/remind <tiempo> <mensaje>`
+- Worker `worker_recordatorio.py`: revisa cada 60 segundos, envía mensajes vencidos
+- Integración completa: programar → esperar → avisar
+
+#### OCR (reconocimiento de texto)
+- Tesseract + pytesseract + tesseract-lang (español)
+- Módulo `ocr_tools.py`: preprocesamiento (grayscale + upscale + contraste + binarizado)
+- Comando `/ocr`: procesa última foto o foto con caption `/ocr`
+- **Limpieza con Groq**: corrige errores típicos del OCR
+- Fallback: múltiples pasadas con PSM 3 y 6
+- Limitación: OCR mediocre en fotos del mundo real (texto chico/curvo/fondos complejos), pero visión por IA (Gemini/Groq) describe perfecto
+
+### Estado actual del organismo:
+- 👁️ Visión: operativa (Gemini/Groq para descripción)
+- 👂 Oídos: operativos (Telegram messages + fotos + audio)
+- 🗣️ Voz: operativa (Groq TTS)
+- 🧠 Memoria corto plazo: operativa (últimos 8 mensajes)
+- 🧠 Memoria largo plazo: operativa (Supabase + inyección automática)
+- 🕷️ Web: operativa (DuckDuckGo + Wikipedia + Jina Reader)
+- 📝 OCR: operativo (Tesseract + limpieza Groq)
+- 🌤️ Clima: operativo (Open-Meteo)
+- 💵 Dólar: operativo (DolarAPI)
+- 📰 Noticias: operativo (RSS feeds)
+- ⏰ Recordatorios: operativo (worker + Supabase)
+- 🤖 Razonamiento: operativo (Groq + Gemini)
+- 🔄 Reflexión: operativa
+
+### Lecciones clave del día:
+1. **Todo parche necesita restart**: el bot no relee el archivo solo
+2. **Memoria persistente transforma al bot**: de pez con memoria de 3 segundos a criatura que recuerda cumpleaños y preferencias
+3. **OCR local es mediocre para fotos reales**: APIs profesionales (Google Vision, AWS Textract) son mucho mejores, pero cuestan. Para fotos del mundo real, visión por IA (Gemini/Groq) hace mejor trabajo
+4. **RSS feeds son más confiables que scraping**: para noticias, los feeds públicos de Clarín/La Nación/Infobae funcionan siempre
+5. **Workers separados**: recordatorios en proceso aparte para no bloquear el bot principal
+
+### Arquitectura actual:
+- `telegram_bot_final.py`: bot principal (dispatcher + handlers + vision + audio)
+- `memoria_persistente.py`: capa Supabase para recuerdos de largo plazo
+- `recordatorios.py`: parseo de tiempos + queries de recordatorios vencidos
+- `worker_recordatorio.py`: proceso separado que corre cada 60s
+- `apis_utiles.py`: clima + dólar + noticias
+- `ocr_tools.py`: OCR con preprocesamiento
+- `web_tools.py`: búsqueda web + lectura de URLs + Wikipedia
+
+### Próximos pasos posibles:
+- Piper TTS (voz local sin internet)
+- llama.cpp (modelo local sin API)
+- Crawl4AI en VM de Oracle (cuando haya server)
+- Mejor búsqueda semántica (embeddings en Supabase)
+- Integración con APIs específicas (tráfico, transporte, etc.)
